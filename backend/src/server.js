@@ -1,0 +1,657 @@
+const path = require("path");
+const crypto = require("crypto");
+const express = require("express");
+const cors = require("cors");
+
+const { config } = require("./config");
+const { initDb } = require("./db/database");
+const {
+  getAllProducts,
+  getProductById,
+  getCategories,
+  getFilteredProducts,
+  getSyncLogs,
+  getPriceChangeLogs,
+  getDuplicateEvents,
+  getClickEvents,
+  getClickSummary,
+  writeClickEvent,
+  createShortlist,
+  updateShortlistBySlug,
+  getShortlistBySlug,
+  createPriceAlert,
+  getPriceAlerts,
+  getAlertNotifications,
+  evaluatePriceAlerts,
+  writeBehaviorEvent,
+  getBehaviorEvents,
+  upsertUserProfile,
+  getUserProfile,
+  assignExperimentVariant,
+  writeExperimentEvent,
+  getExperimentSummary,
+  getExperimentByKey,
+  evaluateExperimentRollout,
+  evaluateAutoExperiments,
+  getExperimentActionLogs,
+  updateExperimentLifecycle,
+  updateExperimentGuardrails,
+  getRevenueSimulationForecast,
+  getFunnelSummary,
+  evaluateAbandonedShortlistReminders,
+  getShortlistReminderNotifications
+} = require("./db/productRepository");
+const {
+  bootstrapSeedDataIfEmpty,
+  refreshCatalogScores,
+  runAmazonSync,
+  startSyncScheduler
+} = require("./jobs/syncJobs");
+const { getCommissionRules } = require("./services/commissionRules");
+const {
+  withRegionAffiliateUrl,
+  inferRegionFromRequest,
+  normalizeRegion,
+  buildAffiliateLink
+} = require("./services/affiliateLinks");
+const { buildIntentPages, getIntentBySlug } = require("./services/seoIntent");
+const {
+  buildProfileFromEvents,
+  getPersonalizedRecommendations
+} = require("./services/personalization");
+const { compareProducts, getSimilarProducts } = require("./services/recommendation");
+
+const app = express();
+const port = config.port;
+
+app.use(cors());
+app.use(express.json());
+
+function ensureAdmin(req, res, next) {
+  if (!config.adminApiKey) {
+    next();
+    return;
+  }
+
+  if (req.header("x-admin-key") !== config.adminApiKey) {
+    res.status(401).json({ error: "Unauthorized. Missing or invalid x-admin-key" });
+    return;
+  }
+
+  next();
+}
+
+function mapSortBy(sortBy) {
+  const sortMap = {
+    reviewCount: "review_count",
+    monthlySalesEstimate: "monthly_sales_estimate",
+    estimatedCommissionValue: "estimated_commission_value",
+    epcScore: "epc_score",
+    expectedRevenuePerClick: "expected_revenue_per_click"
+  };
+
+  return sortMap[sortBy] || sortBy;
+}
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "pickfast-affiliate-api",
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get("/api/categories", async (req, res) => {
+  const categories = await getCategories();
+  res.json({ categories });
+});
+
+app.get("/api/seo/intents", async (req, res) => {
+  const categories = await getCategories();
+  const region = inferRegionFromRequest(req);
+  const intents = buildIntentPages({ categories });
+  const limit = Number(req.query.limit || 30);
+
+  const enriched = await Promise.all(
+    intents.slice(0, limit).map(async (intent) => {
+      const products = await getFilteredProducts(intent.filters);
+      return {
+        ...intent,
+        region,
+        url: `/intent/${intent.slug}`,
+        products: products.slice(0, 4).map((product) => withRegionAffiliateUrl(product, region))
+      };
+    })
+  );
+
+  res.json({ intents: enriched });
+});
+
+app.get("/api/seo/intents/:slug", async (req, res) => {
+  const categories = await getCategories();
+  const region = inferRegionFromRequest(req);
+  const intents = buildIntentPages({ categories });
+  const intent = getIntentBySlug(req.params.slug, intents);
+
+  if (!intent) {
+    return res.status(404).json({ error: "Intent page not found" });
+  }
+
+  const products = await getFilteredProducts(intent.filters);
+
+  res.json({
+    intent,
+    region,
+    products: products.map((product) => withRegionAffiliateUrl(product, region))
+  });
+});
+
+app.get("/api/products", async (req, res) => {
+  const {
+    category,
+    minPrice,
+    maxPrice,
+    minRating,
+    sortBy = "score",
+    order = "desc",
+    limit
+  } = req.query;
+
+  const region = inferRegionFromRequest(req);
+  const products = await getFilteredProducts({
+    category,
+    minPrice,
+    maxPrice,
+    minRating,
+    sortBy: mapSortBy(sortBy),
+    order,
+    limit
+  });
+
+  res.json({
+    total: products.length,
+    products: products.map((product) => withRegionAffiliateUrl(product, region))
+  });
+});
+
+app.get("/api/products/top", async (req, res) => {
+  const { category, limit = 6 } = req.query;
+  const region = inferRegionFromRequest(req);
+
+  const top = await getFilteredProducts({
+    category,
+    sortBy: "score",
+    order: "desc",
+    limit: Number(limit)
+  });
+
+  res.json({ products: top.map((product) => withRegionAffiliateUrl(product, region)) });
+});
+
+app.get("/api/products/:id", async (req, res) => {
+  const region = inferRegionFromRequest(req);
+  const allProducts = await getAllProducts();
+  const product = allProducts.find((item) => item.id === req.params.id);
+
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const similarProducts = getSimilarProducts(product, allProducts, { limit: 4 });
+
+  res.json({
+    product: withRegionAffiliateUrl(product, region),
+    similarProducts: similarProducts.map((item) => withRegionAffiliateUrl(item, region))
+  });
+});
+
+app.get("/api/products/:id/similar", async (req, res) => {
+  const region = inferRegionFromRequest(req);
+  const allProducts = await getAllProducts();
+  const product = allProducts.find((item) => item.id === req.params.id);
+
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const similarProducts = getSimilarProducts(product, allProducts, {
+    limit: Number(req.query.limit) || 4
+  });
+
+  res.json({
+    productId: product.id,
+    similarProducts: similarProducts.map((item) => withRegionAffiliateUrl(item, region))
+  });
+});
+
+app.get("/api/products/:id/affiliate-link", async (req, res) => {
+  const allProducts = await getAllProducts();
+  const product = allProducts.find((item) => item.id === req.params.id);
+
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const region = inferRegionFromRequest(req);
+  const affiliateUrl = buildAffiliateLink(product.amazonUrl, region);
+
+  res.json({
+    productId: product.id,
+    region: normalizeRegion(region),
+    affiliateUrl
+  });
+});
+
+app.post("/api/compare", async (req, res) => {
+  const productIds = req.body.productIds || [];
+
+  if (!Array.isArray(productIds) || productIds.length < 2) {
+    return res
+      .status(400)
+      .json({ error: "Please provide at least two product IDs in productIds array" });
+  }
+
+  const allProducts = await getAllProducts();
+  const selected = allProducts.filter((product) => productIds.includes(product.id));
+
+  if (selected.length < 2) {
+    return res.status(400).json({ error: "At least two valid products are required" });
+  }
+
+  const summary = compareProducts(selected);
+
+  res.json({
+    comparedCount: selected.length,
+    products: selected,
+    summary
+  });
+});
+
+app.get("/api/recommendations", async (req, res) => {
+  const { category, budget, useCase, limit = 6 } = req.query;
+  const budgetNumber = budget ? Number(budget) : null;
+
+  let filtered = await getAllProducts();
+
+  if (category) {
+    filtered = filtered.filter((product) => product.category === category);
+  }
+  if (budgetNumber) {
+    filtered = filtered.filter((product) => product.price <= budgetNumber);
+  }
+  if (useCase) {
+    filtered = filtered.filter((product) => product.useCases.includes(useCase));
+  }
+
+  const recommendations = filtered
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Number(limit));
+
+  const region = inferRegionFromRequest(req);
+
+  res.json({
+    filters: { category: category || null, budget: budgetNumber, useCase: useCase || null },
+    recommendations: recommendations.map((item) => withRegionAffiliateUrl(item, region))
+  });
+});
+
+app.get("/api/experiments/:key/assignment", async (req, res) => {
+  const { sessionId } = req.query;
+
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
+  const assignment = await assignExperimentVariant({
+    experimentKey: req.params.key,
+    sessionId: String(sessionId)
+  });
+
+  res.json({ assignment });
+});
+
+app.post("/api/experiments/:key/events", async (req, res) => {
+  const { sessionId, variantKey, eventType, metadata } = req.body || {};
+
+  if (!sessionId || !variantKey || !eventType) {
+    return res.status(400).json({ error: "sessionId, variantKey and eventType are required" });
+  }
+
+  await writeExperimentEvent({
+    experimentKey: req.params.key,
+    sessionId,
+    variantKey,
+    eventType,
+    metadata
+  });
+
+  res.json({ ok: true });
+});
+
+app.post("/api/track/click", async (req, res) => {
+  const {
+    productId,
+    pageType,
+    placement,
+    region,
+    deviceType,
+    sourceUrl,
+    referrer,
+    affiliateUrl
+  } = req.body || {};
+
+  if (!productId) {
+    return res.status(400).json({ error: "productId is required" });
+  }
+
+  const existingProduct = await getProductById(productId);
+  if (!existingProduct) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const ipHash = crypto.createHash("sha256").update(String(req.ip || "unknown")).digest("hex").slice(0, 24);
+  const normalizedRegion = normalizeRegion(region || inferRegionFromRequest(req));
+
+  await writeClickEvent({
+    productId,
+    pageType,
+    placement,
+    region: normalizedRegion,
+    deviceType,
+    sourceUrl,
+    referrer,
+    affiliateUrl,
+    userAgent: req.header("user-agent") || null,
+    ipHash
+  });
+
+  res.json({ ok: true });
+});
+
+app.post("/api/behavior/track", async (req, res) => {
+  const { sessionId, eventType, productId, category, price, region, metadata } = req.body || {};
+
+  if (!sessionId || !eventType) {
+    return res.status(400).json({ error: "sessionId and eventType are required" });
+  }
+
+  await writeBehaviorEvent({
+    sessionId,
+    eventType,
+    productId,
+    category,
+    price,
+    region: normalizeRegion(region || inferRegionFromRequest(req)),
+    metadata
+  });
+
+  res.json({ ok: true });
+});
+
+app.get("/api/recommendations/personalized", async (req, res) => {
+  const { sessionId, limit = 12 } = req.query;
+
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
+  const region = inferRegionFromRequest(req);
+  const events = await getBehaviorEvents(sessionId, 300);
+  const profileFromEvents = buildProfileFromEvents(events, region);
+  await upsertUserProfile({ sessionId, ...profileFromEvents });
+
+  const profile = (await getUserProfile(sessionId)) || {
+    sessionId,
+    topCategories: [],
+    preferredPrice: null,
+    preferredRegion: region,
+    confidenceScore: 0
+  };
+
+  const allProducts = await getAllProducts();
+  const recommendations = getPersonalizedRecommendations(allProducts, profile, limit).map((item) =>
+    withRegionAffiliateUrl(item, region)
+  );
+
+  res.json({
+    sessionId,
+    profile,
+    recommendations
+  });
+});
+
+app.post("/api/shortlists", async (req, res) => {
+  const { productIds, name, contactEmail, region } = req.body || {};
+
+  if (!Array.isArray(productIds) || productIds.length === 0) {
+    return res.status(400).json({ error: "productIds is required and must be a non-empty array" });
+  }
+
+  const shortlist = await createShortlist({
+    productIds,
+    name,
+    contactEmail,
+    region: normalizeRegion(region || inferRegionFromRequest(req))
+  });
+
+  res.status(201).json({ shortlist });
+});
+
+app.put("/api/shortlists/:slug", async (req, res) => {
+  const { productIds, name, contactEmail, region } = req.body || {};
+
+  if (!Array.isArray(productIds) || productIds.length === 0) {
+    return res.status(400).json({ error: "productIds is required and must be a non-empty array" });
+  }
+
+  const existing = await getShortlistBySlug(req.params.slug);
+  if (!existing) {
+    return res.status(404).json({ error: "Shortlist not found" });
+  }
+
+  const shortlist = await updateShortlistBySlug(req.params.slug, {
+    productIds,
+    name,
+    contactEmail,
+    region: normalizeRegion(region || inferRegionFromRequest(req))
+  });
+
+  res.json({ shortlist });
+});
+
+app.get("/api/shortlists/:slug", async (req, res) => {
+  const shortlist = await getShortlistBySlug(req.params.slug);
+  if (!shortlist) {
+    return res.status(404).json({ error: "Shortlist not found" });
+  }
+
+  const region = normalizeRegion(shortlist.region || inferRegionFromRequest(req));
+  const allProducts = await getAllProducts();
+  const productMap = new Map(allProducts.map((product) => [product.id, product]));
+  const products = shortlist.productIds
+    .map((id) => productMap.get(id))
+    .filter(Boolean)
+    .map((product) => withRegionAffiliateUrl(product, region));
+
+  res.json({ shortlist: { ...shortlist, region }, products });
+});
+
+app.post("/api/alerts/subscribe", async (req, res) => {
+  const { email, productId, targetPrice, region } = req.body || {};
+
+  if (!email || !productId || !targetPrice) {
+    return res.status(400).json({ error: "email, productId, and targetPrice are required" });
+  }
+
+  const product = await getProductById(productId);
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const alert = await createPriceAlert({
+    email,
+    productId,
+    targetPrice: Number(targetPrice),
+    region: normalizeRegion(region || inferRegionFromRequest(req))
+  });
+
+  res.status(201).json({ alert });
+});
+
+app.post("/api/admin/sync/run", ensureAdmin, async (req, res) => {
+  const syncResult = await runAmazonSync();
+  res.json(syncResult);
+});
+
+app.get("/api/admin/sync/logs", ensureAdmin, async (req, res) => {
+  const logs = await getSyncLogs(req.query.limit || 20);
+  res.json({ logs });
+});
+
+app.get("/api/admin/price-changes", ensureAdmin, async (req, res) => {
+  const logs = await getPriceChangeLogs(req.query.limit || 50);
+  res.json({ logs });
+});
+
+app.get("/api/admin/duplicates", ensureAdmin, async (req, res) => {
+  const events = await getDuplicateEvents(req.query.limit || 50);
+  res.json({ events });
+});
+
+app.get("/api/admin/commission-rules", ensureAdmin, (req, res) => {
+  res.json({ rules: getCommissionRules() });
+});
+
+app.get("/api/admin/clicks/recent", ensureAdmin, async (req, res) => {
+  const events = await getClickEvents(req.query.limit || 50);
+  res.json({ events });
+});
+
+app.get("/api/admin/clicks/summary", ensureAdmin, async (req, res) => {
+  const summary = await getClickSummary(req.query.days || 30);
+  res.json(summary);
+});
+
+app.get("/api/admin/experiments/:key/summary", ensureAdmin, async (req, res) => {
+  const summary = await getExperimentSummary(req.params.key, req.query.days || 14);
+  res.json(summary);
+});
+
+app.get("/api/admin/experiments/:key/config", ensureAdmin, async (req, res) => {
+  const experiment = await getExperimentByKey(req.params.key);
+  if (!experiment) {
+    return res.status(404).json({ error: "Experiment not found" });
+  }
+
+  res.json({ experiment });
+});
+
+app.patch("/api/admin/experiments/:key/lifecycle", ensureAdmin, async (req, res) => {
+  const { lifecycleState, reason } = req.body || {};
+  if (!lifecycleState) {
+    return res.status(400).json({ error: "lifecycleState is required" });
+  }
+
+  const experiment = await updateExperimentLifecycle(
+    req.params.key,
+    lifecycleState,
+    reason || ""
+  );
+
+  if (!experiment) {
+    return res.status(404).json({ error: "Experiment not found" });
+  }
+
+  res.json({ experiment });
+});
+
+app.patch("/api/admin/experiments/:key/guardrails", ensureAdmin, async (req, res) => {
+  const experiment = await updateExperimentGuardrails(req.params.key, req.body || {});
+
+  if (!experiment) {
+    return res.status(404).json({ error: "Experiment not found" });
+  }
+
+  res.json({ experiment });
+});
+
+app.post("/api/admin/experiments/:key/evaluate", ensureAdmin, async (req, res) => {
+  const result = await evaluateExperimentRollout(req.params.key);
+  if (!result.ok) {
+    return res.status(404).json(result);
+  }
+
+  res.json(result);
+});
+
+app.post("/api/admin/experiments/evaluate-auto", ensureAdmin, async (req, res) => {
+  const result = await evaluateAutoExperiments();
+  res.json(result);
+});
+
+app.get("/api/admin/experiments/:key/actions", ensureAdmin, async (req, res) => {
+  const actions = await getExperimentActionLogs(req.params.key, req.query.limit || 50);
+  res.json({ actions });
+});
+
+app.get("/api/admin/funnel/summary", ensureAdmin, async (req, res) => {
+  const summary = await getFunnelSummary(req.query.days || 30);
+  res.json(summary);
+});
+
+app.get("/api/admin/revenue/simulation", ensureAdmin, async (req, res) => {
+  const forecast = await getRevenueSimulationForecast({
+    lookbackDays: req.query.lookbackDays,
+    horizonDays: req.query.horizonDays,
+    clickGrowthRate: req.query.clickGrowthRate
+  });
+
+  res.json(forecast);
+});
+
+app.get("/api/admin/alerts/subscriptions", ensureAdmin, async (req, res) => {
+  const alerts = await getPriceAlerts(req.query.limit || 100);
+  res.json({ alerts });
+});
+
+app.get("/api/admin/alerts/notifications", ensureAdmin, async (req, res) => {
+  const notifications = await getAlertNotifications(req.query.limit || 100);
+  res.json({ notifications });
+});
+
+app.post("/api/admin/alerts/check", ensureAdmin, async (req, res) => {
+  const result = await evaluatePriceAlerts();
+  res.json({ ok: true, ...result });
+});
+
+app.post("/api/admin/reminders/check", ensureAdmin, async (req, res) => {
+  const result = await evaluateAbandonedShortlistReminders(req.query.hours || 24);
+  res.json({ ok: true, ...result });
+});
+
+app.get("/api/admin/reminders/notifications", ensureAdmin, async (req, res) => {
+  const notifications = await getShortlistReminderNotifications(req.query.limit || 100);
+  res.json({ notifications });
+});
+
+app.use(express.static(path.join(__dirname, "../public")));
+
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+async function bootstrap() {
+  await initDb();
+  await bootstrapSeedDataIfEmpty();
+  await refreshCatalogScores();
+  startSyncScheduler();
+
+  app.listen(port, () => {
+    console.log(`PickFast API running on http://localhost:${port}`);
+  });
+}
+
+bootstrap().catch((error) => {
+  console.error("Failed to bootstrap PickFast server", error);
+  process.exit(1);
+});

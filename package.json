@@ -1,0 +1,21 @@
+{
+  "name": "pickfast-workspace",
+  "version": "1.0.0",
+  "description": "Workspace runner for PickFast frontend (Next.js) and backend (Express)",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start": "npm --prefix backend run start",
+    "start:frontend": "npm --prefix frontend run start",
+    "build:frontend": "npm --prefix frontend run build",
+    "test": "echo \"No tests configured\""
+  },
+  "keywords": ["affiliate", "amazon", "comparison", "recommendation"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

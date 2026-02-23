@@ -1,0 +1,28 @@
+{
+  "name": "pickfast",
+  "version": "1.0.0",
+  "description": "Affiliate comparison and recommendation platform MVP",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "echo \"No tests configured\""
+  },
+  "keywords": [
+    "affiliate",
+    "amazon",
+    "comparison",
+    "recommendation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws4": "^1.13.2",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "pickfast-workspace": "file:..",
+    "sqlite3": "^5.1.7"
+  }
+}

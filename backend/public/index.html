@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PickFast Affiliate Engine</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #141b2d;
+        --panel-2: #1d2740;
+        --text: #e7ecff;
+        --muted: #9faecc;
+        --accent: #4f8cff;
+        --success: #29b66d;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .container {
+        width: min(1100px, 92%);
+        margin: 0 auto;
+        padding: 24px 0 50px;
+      }
+      h1,
+      h2,
+      h3 {
+        margin-top: 0;
+      }
+      .hero {
+        background: linear-gradient(120deg, #1c2d56 0%, #11192d 100%);
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid #2b3757;
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .card img {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+      }
+      .card-body {
+        padding: 12px;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .price {
+        color: #7ef0b2;
+        font-size: 20px;
+        font-weight: bold;
+      }
+      .score {
+        display: inline-block;
+        margin-left: 8px;
+        color: #ffd27a;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+      select,
+      button,
+      input {
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid #334064;
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      button {
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .btn-success {
+        background: var(--success);
+        border-color: var(--success);
+        color: #082215;
+        font-weight: bold;
+      }
+      .section {
+        margin-top: 24px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid #2b3757;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #2b3757;
+        padding: 10px;
+        text-align: left;
+      }
+      .pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border: 1px solid #3c4a73;
+        border-radius: 20px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .small {
+        font-size: 13px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <section class="hero">
+        <h1>PickFast Affiliate Engine</h1>
+        <p>
+          High-scoring products auto-ranked by commission potential + sales strength with built-in
+          product comparison and similar recommendations.
+        </p>
+      </section>
+
+      <section class="section panel">
+        <h2>Find Products</h2>
+        <div class="row">
+          <select id="categoryFilter">
+            <option value="">All categories</option>
+          </select>
+          <input id="budgetInput" type="number" placeholder="Budget (e.g. 300)" />
+          <button id="loadBtn" class="btn-primary">Load Products</button>
+        </div>
+        <p class="small">Select products to compare, then click Compare Selected.</p>
+      </section>
+
+      <section class="section">
+        <div class="row" style="justify-content: space-between; align-items: center">
+          <h2 style="margin: 0">Top Opportunities</h2>
+          <button id="compareBtn">Compare Selected</button>
+        </div>
+        <div id="productGrid" class="grid"></div>
+      </section>
+
+      <section class="section panel" id="compareSection" style="display: none">
+        <h2>Comparison Engine</h2>
+        <div id="comparisonSummary"></div>
+        <div style="overflow-x: auto">
+          <table id="comparisonTable"></table>
+        </div>
+      </section>
+
+      <section class="section panel" id="similarSection" style="display: none">
+        <h2>Similar Product Recommendations</h2>
+        <div id="similarGrid" class="grid"></div>
+      </section>
+    </div>
+
+    <script>
+      const productGrid = document.getElementById("productGrid");
+      const categoryFilter = document.getElementById("categoryFilter");
+      const budgetInput = document.getElementById("budgetInput");
+      const compareBtn = document.getElementById("compareBtn");
+      const loadBtn = document.getElementById("loadBtn");
+      const compareSection = document.getElementById("compareSection");
+      const comparisonTable = document.getElementById("comparisonTable");
+      const comparisonSummary = document.getElementById("comparisonSummary");
+      const similarSection = document.getElementById("similarSection");
+      const similarGrid = document.getElementById("similarGrid");
+
+      let loadedProducts = [];
+
+      function formatMoney(value) {
+        return `$${value.toFixed(2)}`;
+      }
+
+      async function loadCategories() {
+        const response = await fetch("/api/categories");
+        const data = await response.json();
+
+        for (const category of data.categories) {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category;
+          categoryFilter.appendChild(option);
+        }
+      }
+
+      async function loadProducts() {
+        const category = categoryFilter.value;
+        const budget = budgetInput.value;
+        const params = new URLSearchParams({ sortBy: "score", order: "desc", limit: "12" });
+
+        if (category) {
+          params.set("category", category);
+        }
+        if (budget) {
+          params.set("maxPrice", budget);
+        }
+
+        const response = await fetch(`/api/products?${params.toString()}`);
+        const data = await response.json();
+        loadedProducts = data.products;
+        renderProducts();
+      }
+
+      function renderProducts() {
+        if (!loadedProducts.length) {
+          productGrid.innerHTML = `<div class="panel">No products matched your filters.</div>`;
+          return;
+        }
+
+        productGrid.innerHTML = loadedProducts
+          .map(
+            (product) => `
+          <article class="card">
+            <img src="${product.image}" alt="${product.name}" />
+            <div class="card-body">
+              <span class="pill">${product.category}</span>
+              <h3>${product.name}</h3>
+              <div class="meta">${product.brand} • Rating ${product.rating} (${product.reviewCount} reviews)</div>
+              <p class="price">${formatMoney(product.price)} <span class="score">Score ${product.score}</span></p>
+              <p class="small">Commission rate: ${(product.commissionRate * 100).toFixed(1)}%</p>
+              <div class="row">
+                <label><input type="checkbox" data-compare-id="${product.id}" /> Compare</label>
+                <button onclick="showSimilar('${product.id}')">Similar</button>
+                <a href="${product.amazonUrl}" target="_blank" rel="noreferrer">
+                  <button class="btn-success">Buy on Amazon</button>
+                </a>
+              </div>
+            </div>
+          </article>
+        `
+          )
+          .join("");
+      }
+
+      async function runComparison() {
+        const selected = [...document.querySelectorAll("input[data-compare-id]:checked")].map(
+          (checkbox) => checkbox.getAttribute("data-compare-id")
+        );
+
+        if (selected.length < 2) {
+          alert("Please select at least 2 products to compare.");
+          return;
+        }
+
+        const response = await fetch("/api/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productIds: selected })
+        });
+        const data = await response.json();
+
+        compareSection.style.display = "block";
+        comparisonSummary.innerHTML = `
+          <p><strong>Budget winner:</strong> ${data.summary.winners.budget.name}</p>
+          <p><strong>Performance winner:</strong> ${data.summary.winners.performance.name}</p>
+          <p><strong>Overall winner:</strong> ${data.summary.winners.overall.name}</p>
+        `;
+
+        const headers = ["Name", "Price", "Rating", "Commission %", "Score"];
+        comparisonTable.innerHTML = `
+          <thead>
+            <tr>${headers.map((item) => `<th>${item}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${data.products
+              .map(
+                (product) => `
+              <tr>
+                <td>${product.name}</td>
+                <td>${formatMoney(product.price)}</td>
+                <td>${product.rating}</td>
+                <td>${(product.commissionRate * 100).toFixed(1)}%</td>
+                <td>${product.score}</td>
+              </tr>
+            `
+              )
+              .join("")}
+          </tbody>
+        `;
+      }
+
+      async function showSimilar(productId) {
+        const response = await fetch(`/api/products/${productId}/similar?limit=4`);
+        const data = await response.json();
+
+        similarSection.style.display = "block";
+        similarGrid.innerHTML = data.similarProducts
+          .map(
+            (product) => `
+          <article class="card">
+            <img src="${product.image}" alt="${product.name}" />
+            <div class="card-body">
+              <h3>${product.name}</h3>
+              <div class="meta">Similarity score: ${product.similarityScore}</div>
+              <p class="price">${formatMoney(product.price)}</p>
+              <a href="${product.amazonUrl}" target="_blank" rel="noreferrer">
+                <button class="btn-success">View on Amazon</button>
+              </a>
+            </div>
+          </article>
+        `
+          )
+          .join("");
+      }
+
+      compareBtn.addEventListener("click", runComparison);
+      loadBtn.addEventListener("click", loadProducts);
+      window.showSimilar = showSimilar;
+
+      async function bootstrap() {
+        await loadCategories();
+        await loadProducts();
+      }
+
+      bootstrap();
+    </script>
+  </body>
+</html>
