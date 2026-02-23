@@ -78,6 +78,8 @@ async function initDb() {
       score REAL DEFAULT 0,
       epc_score REAL DEFAULT 0,
       expected_revenue_per_click REAL DEFAULT 0,
+      conversion_probability REAL DEFAULT 0,
+      modeled_commission_rate REAL DEFAULT 0,
       estimated_commission_value REAL DEFAULT 0,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -86,6 +88,8 @@ async function initDb() {
 
   await ensureColumn("products", "epc_score", "REAL DEFAULT 0");
   await ensureColumn("products", "expected_revenue_per_click", "REAL DEFAULT 0");
+  await ensureColumn("products", "conversion_probability", "REAL DEFAULT 0");
+  await ensureColumn("products", "modeled_commission_rate", "REAL DEFAULT 0");
 
   await run(`
     CREATE TABLE IF NOT EXISTS sync_logs (
@@ -106,6 +110,20 @@ async function initDb() {
       new_price REAL NOT NULL,
       source TEXT NOT NULL,
       changed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(product_id) REFERENCES products(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS price_tracking (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id TEXT UNIQUE NOT NULL,
+      last_price REAL NOT NULL,
+      current_price REAL NOT NULL,
+      drop_percent REAL DEFAULT 0,
+      is_hot_deal INTEGER DEFAULT 0,
+      source TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(product_id) REFERENCES products(id)
     )
   `);
@@ -166,6 +184,18 @@ async function initDb() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY(product_id) REFERENCES products(id)
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS newsletter_signups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      source TEXT,
+      status TEXT DEFAULT 'active',
+      metadata_json TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -386,6 +416,9 @@ async function initDb() {
     "CREATE INDEX IF NOT EXISTS idx_price_change_product_id ON price_change_logs(product_id)"
   );
   await run("CREATE INDEX IF NOT EXISTS idx_price_change_changed_at ON price_change_logs(changed_at DESC)");
+  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_product_id ON price_tracking(product_id)");
+  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_hot_deal ON price_tracking(is_hot_deal)");
+  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_updated_at ON price_tracking(updated_at DESC)");
   await run("CREATE INDEX IF NOT EXISTS idx_duplicate_product_id ON duplicate_events(product_id)");
   await run(
     "CREATE INDEX IF NOT EXISTS idx_click_events_product_id ON affiliate_click_events(product_id)"
@@ -395,6 +428,8 @@ async function initDb() {
   );
   await run("CREATE INDEX IF NOT EXISTS idx_shortlists_slug ON shortlists(slug)");
   await run("CREATE INDEX IF NOT EXISTS idx_shortlists_contact_email ON shortlists(contact_email)");
+  await run("CREATE INDEX IF NOT EXISTS idx_newsletter_signups_email ON newsletter_signups(email)");
+  await run("CREATE INDEX IF NOT EXISTS idx_newsletter_signups_status ON newsletter_signups(status)");
   await run("CREATE INDEX IF NOT EXISTS idx_price_alerts_email ON price_alerts(email)");
   await run("CREATE INDEX IF NOT EXISTS idx_price_alerts_product_id ON price_alerts(product_id)");
   await run(

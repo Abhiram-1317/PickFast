@@ -60,6 +60,7 @@ Public APIs:
 - `PUT /api/shortlists/:slug`
 - `GET /api/shortlists/:slug`
 - `POST /api/alerts/subscribe`
+- `POST /api/newsletter/signup`
 
 Admin APIs:
 
@@ -79,7 +80,11 @@ Admin APIs:
 - `POST /api/admin/experiments/evaluate-auto`
 - `GET /api/admin/experiments/:key/actions?limit=50`
 - `GET /api/admin/revenue/simulation?lookbackDays=30&horizonDays=30&clickGrowthRate=0.08`
+- `GET /api/admin/revenue/model-signals?lookbackDays=90`
+- `GET /api/admin/weekly-pm-report?windowDays=7&experimentKey=hero_cta_v1`
+- `GET /api/admin/db-overview`
 - `GET /api/admin/alerts/subscriptions?limit=100`
+- `GET /api/admin/newsletter/signups?limit=100`
 - `GET /api/admin/alerts/notifications?limit=100`
 - `POST /api/admin/alerts/check`
 - `POST /api/admin/reminders/check?hours=24`
@@ -158,3 +163,11 @@ Without valid credentials, sync endpoints fail safely and log errors while the r
 - Scenario projections: conservative, base, aggressive
 - Region-category breakdown and top projected revenue segments
 - Configurable model defaults from environment variables
+
+## Implemented Advanced Features (Batch 10)
+
+- Real-data tuned EPC model using click + behavior signals with Bayesian smoothing
+- Modeled commission rate and conversion probability persisted per product
+- Dynamic category-aware hot-deal trigger thresholds calibrated from historical price drops
+- Revenue simulation now blends observed EPC with modeled EPC using click-volume confidence
+- Admin diagnostics endpoint for revenue calibration inputs (`/api/admin/revenue/model-signals`)

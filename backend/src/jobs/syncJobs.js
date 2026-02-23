@@ -9,6 +9,7 @@ const {
   writeSyncLog,
   writeDuplicateEvents,
   getAllProducts,
+  getRevenueModelSignals,
   evaluateAutoExperiments
 } = require("../db/productRepository");
 
@@ -20,8 +21,9 @@ async function persistWithRecalculatedScores(incomingProducts, source) {
     ...existingProducts.filter((product) => !incomingMap.has(product.id)),
     ...incomingProducts
   ];
+  const revenueSignals = await getRevenueModelSignals(config.revenueModel.lookbackDays);
   const commissionAdjusted = applyCommissionRules(merged);
-  const scored = withScores(commissionAdjusted);
+  const scored = withScores(commissionAdjusted, { revenueSignals });
   await upsertProducts(scored, source);
   return incomingProducts.length;
 }
@@ -32,7 +34,8 @@ async function bootstrapSeedDataIfEmpty() {
     return;
   }
 
-  const scoredSeed = withScores(applyCommissionRules(seedProducts));
+  const revenueSignals = await getRevenueModelSignals(config.revenueModel.lookbackDays);
+  const scoredSeed = withScores(applyCommissionRules(seedProducts), { revenueSignals });
   await upsertProducts(scoredSeed, "seed");
   await writeSyncLog({
     status: "success",
@@ -48,7 +51,8 @@ async function refreshCatalogScores() {
     return;
   }
 
-  const rescored = withScores(applyCommissionRules(current));
+  const revenueSignals = await getRevenueModelSignals(config.revenueModel.lookbackDays);
+  const rescored = withScores(applyCommissionRules(current), { revenueSignals });
   await upsertProducts(rescored, "system");
 }
 

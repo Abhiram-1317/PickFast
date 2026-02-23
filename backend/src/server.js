@@ -13,9 +13,14 @@ const {
   getSyncLogs,
   getPriceChangeLogs,
   getDuplicateEvents,
+  getRevenueModelSignals,
+  getHotDeals,
+  getHigherCommissionProducts,
   getClickEvents,
   getClickSummary,
   writeClickEvent,
+  createNewsletterSignup,
+  getNewsletterSignups,
   createShortlist,
   updateShortlistBySlug,
   getShortlistBySlug,
@@ -37,6 +42,8 @@ const {
   updateExperimentLifecycle,
   updateExperimentGuardrails,
   getRevenueSimulationForecast,
+  getWeeklyPmReport,
+  getDbOverview,
   getFunnelSummary,
   evaluateAbandonedShortlistReminders,
   getShortlistReminderNotifications
@@ -91,6 +98,13 @@ function mapSortBy(sortBy) {
   };
 
   return sortMap[sortBy] || sortBy;
+}
+
+function toSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
 app.get("/api/health", (req, res) => {
@@ -188,6 +202,15 @@ app.get("/api/products/top", async (req, res) => {
   res.json({ products: top.map((product) => withRegionAffiliateUrl(product, region)) });
 });
 
+app.get("/api/products/hot-deals", async (req, res) => {
+  const region = inferRegionFromRequest(req);
+  const deals = await getHotDeals(req.query.limit || 8);
+
+  res.json({
+    deals: deals.map((deal) => withRegionAffiliateUrl(deal, region))
+  });
+});
+
 app.get("/api/products/:id", async (req, res) => {
   const region = inferRegionFromRequest(req);
   const allProducts = await getAllProducts();
@@ -198,10 +221,14 @@ app.get("/api/products/:id", async (req, res) => {
   }
 
   const similarProducts = getSimilarProducts(product, allProducts, { limit: 4 });
+  const higherCommissionProducts = await getHigherCommissionProducts(product.id, 6);
 
   res.json({
     product: withRegionAffiliateUrl(product, region),
-    similarProducts: similarProducts.map((item) => withRegionAffiliateUrl(item, region))
+    similarProducts: similarProducts.map((item) => withRegionAffiliateUrl(item, region)),
+    higherCommissionProducts: higherCommissionProducts.map((item) =>
+      withRegionAffiliateUrl(item, region)
+    )
   });
 });
 
@@ -221,6 +248,24 @@ app.get("/api/products/:id/similar", async (req, res) => {
   res.json({
     productId: product.id,
     similarProducts: similarProducts.map((item) => withRegionAffiliateUrl(item, region))
+  });
+});
+
+app.get("/api/products/:id/higher-commission", async (req, res) => {
+  const region = inferRegionFromRequest(req);
+  const product = await getProductById(req.params.id);
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const recommendations = await getHigherCommissionProducts(
+    req.params.id,
+    Number(req.query.limit || 6)
+  );
+
+  res.json({
+    productId: req.params.id,
+    recommendations: recommendations.map((item) => withRegionAffiliateUrl(item, region))
   });
 });
 
@@ -368,6 +413,45 @@ app.post("/api/track/click", async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/buy/:slug", async (req, res) => {
+  const { slug } = req.params;
+  const region = normalizeRegion(req.query.region || inferRegionFromRequest(req));
+  const pageType = req.query.pageType || "redirect";
+  const placement = req.query.placement || "buy_redirect";
+  const allProducts = await getAllProducts();
+
+  let product = null;
+  if (req.query.pid) {
+    product = allProducts.find((item) => item.id === req.query.pid);
+  }
+
+  if (!product) {
+    product = allProducts.find((item) => toSlug(item.name) === slug);
+  }
+
+  if (!product) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  const affiliateUrl = buildAffiliateLink(product.amazonUrl, region);
+  const ipHash = crypto.createHash("sha256").update(String(req.ip || "unknown")).digest("hex").slice(0, 24);
+
+  await writeClickEvent({
+    productId: product.id,
+    pageType,
+    placement,
+    region,
+    deviceType: /Mobi|Android|iPhone/i.test(req.header("user-agent") || "") ? "mobile" : "desktop",
+    sourceUrl: req.originalUrl,
+    referrer: req.header("referer") || null,
+    affiliateUrl,
+    userAgent: req.header("user-agent") || null,
+    ipHash
+  });
+
+  res.redirect(302, affiliateUrl);
+});
+
 app.post("/api/behavior/track", async (req, res) => {
   const { sessionId, eventType, productId, category, price, region, metadata } = req.body || {};
 
@@ -498,6 +582,23 @@ app.post("/api/alerts/subscribe", async (req, res) => {
   res.status(201).json({ alert });
 });
 
+app.post("/api/newsletter/signup", async (req, res) => {
+  const { email, source, metadata } = req.body || {};
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    return res.status(400).json({ error: "Valid email is required" });
+  }
+
+  const signup = await createNewsletterSignup({
+    email: normalizedEmail,
+    source: source || "homepage",
+    metadata: metadata || {}
+  });
+
+  res.status(201).json({ signup });
+});
+
 app.post("/api/admin/sync/run", ensureAdmin, async (req, res) => {
   const syncResult = await runAmazonSync();
   res.json(syncResult);
@@ -609,9 +710,34 @@ app.get("/api/admin/revenue/simulation", ensureAdmin, async (req, res) => {
   res.json(forecast);
 });
 
+app.get("/api/admin/revenue/model-signals", ensureAdmin, async (req, res) => {
+  const lookbackDays = Number(req.query.lookbackDays || config.revenueModel.lookbackDays);
+  const signals = await getRevenueModelSignals(lookbackDays);
+  res.json({ signals });
+});
+
+app.get("/api/admin/weekly-pm-report", ensureAdmin, async (req, res) => {
+  const report = await getWeeklyPmReport({
+    windowDays: req.query.windowDays,
+    experimentKey: req.query.experimentKey || "hero_cta_v1"
+  });
+
+  res.json(report);
+});
+
+app.get("/api/admin/db-overview", ensureAdmin, async (_req, res) => {
+  const overview = await getDbOverview();
+  res.json(overview);
+});
+
 app.get("/api/admin/alerts/subscriptions", ensureAdmin, async (req, res) => {
   const alerts = await getPriceAlerts(req.query.limit || 100);
   res.json({ alerts });
+});
+
+app.get("/api/admin/newsletter/signups", ensureAdmin, async (req, res) => {
+  const signups = await getNewsletterSignups(req.query.limit || 100);
+  res.json({ signups });
 });
 
 app.get("/api/admin/alerts/notifications", ensureAdmin, async (req, res) => {

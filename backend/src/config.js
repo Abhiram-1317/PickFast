@@ -42,6 +42,18 @@ const config = {
     aggressiveMultiplier: Number(process.env.REVENUE_SIM_AGGRESSIVE_MULTIPLIER || 1.2),
     fallbackDailyClicks: Number(process.env.REVENUE_SIM_FALLBACK_DAILY_CLICKS || 20)
   },
+  revenueModel: {
+    lookbackDays: Number(process.env.REVENUE_MODEL_LOOKBACK_DAYS || 90),
+    minCategorySamples: Number(process.env.REVENUE_MODEL_MIN_CATEGORY_SAMPLES || 8),
+    bayesianPriorAlpha: Number(process.env.REVENUE_MODEL_PRIOR_ALPHA || 2),
+    bayesianPriorBeta: Number(process.env.REVENUE_MODEL_PRIOR_BETA || 38),
+    baseConversionFloor: Number(process.env.REVENUE_MODEL_BASE_CVR_FLOOR || 0.02),
+    baseConversionCeiling: Number(process.env.REVENUE_MODEL_BASE_CVR_CEILING || 0.35),
+    commissionLiftCap: Number(process.env.REVENUE_MODEL_COMMISSION_LIFT_CAP || 0.35),
+    priceDropTriggerFloor: Number(process.env.PRICE_DROP_TRIGGER_FLOOR || 0.08),
+    priceDropTriggerCeiling: Number(process.env.PRICE_DROP_TRIGGER_CEILING || 0.2),
+    defaultPriceDropTrigger: Number(process.env.PRICE_DROP_TRIGGER_DEFAULT || 0.1)
+  },
   experiments: {
     defaultMinSampleSize: Number(process.env.EXP_MIN_SAMPLE_SIZE || 50),
     defaultMinRuntimeDays: Number(process.env.EXP_MIN_RUNTIME_DAYS || 3),

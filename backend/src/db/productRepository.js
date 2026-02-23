@@ -28,6 +28,8 @@ function mapRowToProduct(row) {
     score: row.score,
     epcScore: row.epc_score,
     expectedRevenuePerClick: row.expected_revenue_per_click,
+    conversionProbability: row.conversion_probability,
+    modeledCommissionRate: row.modeled_commission_rate,
     estimatedCommissionValue: row.estimated_commission_value
   };
 }
@@ -76,6 +78,8 @@ async function getFilteredProducts(filters = {}) {
     "monthly_sales_estimate",
     "epc_score",
     "expected_revenue_per_click",
+    "conversion_probability",
+    "modeled_commission_rate",
     "estimated_commission_value"
   ].includes(sortBy)
     ? sortBy
@@ -103,25 +107,104 @@ async function getCategories() {
   return rows.map((row) => row.category);
 }
 
+async function getDynamicPriceDropThresholds() {
+  const rows = await all(
+    `
+    SELECT
+      COALESCE(p.category, 'general') AS category,
+      COUNT(*) AS samples,
+      AVG((pcl.old_price - pcl.new_price) / NULLIF(pcl.old_price, 0)) AS avg_drop
+    FROM price_change_logs pcl
+    LEFT JOIN products p ON p.id = pcl.product_id
+    WHERE pcl.old_price > 0
+      AND pcl.new_price < pcl.old_price
+      AND datetime(pcl.changed_at) >= datetime('now', '-180 day')
+    GROUP BY COALESCE(p.category, 'general')
+  `
+  );
+
+  const thresholds = new Map();
+  for (const row of rows) {
+    const samples = Number(row.samples || 0);
+    const avgDrop = Number(row.avg_drop || 0);
+
+    if (samples < Number(config.revenueModel.minCategorySamples || 8)) {
+      continue;
+    }
+
+    const tuned = Math.min(
+      Math.max(
+        avgDrop * 1.15,
+        Number(config.revenueModel.priceDropTriggerFloor || 0.08)
+      ),
+      Number(config.revenueModel.priceDropTriggerCeiling || 0.2)
+    );
+
+    thresholds.set(
+      String(row.category || "general"),
+      Number(tuned.toFixed(4))
+    );
+  }
+
+  return thresholds;
+}
+
 async function upsertProducts(products, source = "seed") {
+  const priceDropThresholds = await getDynamicPriceDropThresholds();
+
   for (const product of products) {
     const existing = await get("SELECT id, price FROM products WHERE id = ?", [product.id]);
+    let lastPrice = Number(product.price);
+    let currentPrice = Number(product.price);
+    let dropPercent = 0;
+    let isHotDeal = 0;
 
     if (existing && Number(existing.price) !== Number(product.price)) {
+      lastPrice = Number(existing.price);
+      currentPrice = Number(product.price);
+      if (lastPrice > 0 && currentPrice < lastPrice) {
+        dropPercent = (lastPrice - currentPrice) / lastPrice;
+        const categoryThreshold = priceDropThresholds.get(product.category);
+        const hotDealThreshold =
+          categoryThreshold !== undefined
+            ? categoryThreshold
+            : Number(config.revenueModel.defaultPriceDropTrigger || 0.1);
+        isHotDeal = dropPercent >= hotDealThreshold ? 1 : 0;
+      }
+
       await run(
         `INSERT INTO price_change_logs (product_id, old_price, new_price, source) VALUES (?, ?, ?, ?)`,
         [product.id, Number(existing.price), Number(product.price), source]
       );
+    } else if (existing) {
+      lastPrice = Number(existing.price);
+      currentPrice = Number(product.price);
     }
+
+    await run(
+      `
+      INSERT INTO price_tracking (product_id, last_price, current_price, drop_percent, is_hot_deal, source, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(product_id) DO UPDATE SET
+        last_price = excluded.last_price,
+        current_price = excluded.current_price,
+        drop_percent = excluded.drop_percent,
+        is_hot_deal = excluded.is_hot_deal,
+        source = excluded.source,
+        updated_at = CURRENT_TIMESTAMP
+    `,
+      [product.id, lastPrice, currentPrice, dropPercent, isHotDeal, source]
+    );
 
     await run(
       `
       INSERT INTO products (
         id, name, category, brand, price, original_price, rating, review_count,
         commission_rate, monthly_sales_estimate, stock_status, trend_score,
-        specs_json, use_cases_json, amazon_url, image, source, score, epc_score, expected_revenue_per_click, estimated_commission_value,
+        specs_json, use_cases_json, amazon_url, image, source, score, epc_score, expected_revenue_per_click,
+        conversion_probability, modeled_commission_rate, estimated_commission_value,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         category = excluded.category,
@@ -142,6 +225,8 @@ async function upsertProducts(products, source = "seed") {
         score = excluded.score,
         epc_score = excluded.epc_score,
         expected_revenue_per_click = excluded.expected_revenue_per_click,
+        conversion_probability = excluded.conversion_probability,
+        modeled_commission_rate = excluded.modeled_commission_rate,
         estimated_commission_value = excluded.estimated_commission_value,
         updated_at = CURRENT_TIMESTAMP
     `,
@@ -166,6 +251,8 @@ async function upsertProducts(products, source = "seed") {
         product.score || 0,
         product.epcScore || 0,
         product.expectedRevenuePerClick || 0,
+        product.conversionProbability || 0,
+        product.modeledCommissionRate || product.commissionRate || 0,
         product.estimatedCommissionValue || 0
       ]
     );
@@ -228,6 +315,145 @@ async function getDuplicateEvents(limit = 50) {
     ...row,
     context: row.context_json ? JSON.parse(row.context_json) : {}
   }));
+}
+
+async function getRevenueModelSignals(lookbackDays = config.revenueModel.lookbackDays) {
+  const safeLookback = Math.max(Number(lookbackDays || 90), 1);
+  const sinceExpr = `-${safeLookback} day`;
+
+  const productClickRows = await all(
+    `
+    SELECT product_id, COUNT(*) AS clicks
+    FROM affiliate_click_events
+    WHERE datetime(created_at) >= datetime('now', ?)
+    GROUP BY product_id
+  `,
+    [sinceExpr]
+  );
+
+  const categoryClickRows = await all(
+    `
+    SELECT COALESCE(p.category, 'general') AS category, COUNT(*) AS clicks
+    FROM affiliate_click_events ace
+    LEFT JOIN products p ON p.id = ace.product_id
+    WHERE datetime(ace.created_at) >= datetime('now', ?)
+    GROUP BY COALESCE(p.category, 'general')
+  `,
+    [sinceExpr]
+  );
+
+  const categoryConversionRows = await all(
+    `
+    SELECT
+      COALESCE(category, 'general') AS category,
+      SUM(CASE WHEN event_type = 'affiliate_click' THEN 1 ELSE 0 END) AS successes,
+      SUM(CASE WHEN event_type IN ('catalog_load', 'intent_apply', 'similar_open', 'affiliate_click') THEN 1 ELSE 0 END) AS trials
+    FROM behavior_events
+    WHERE datetime(created_at) >= datetime('now', ?)
+    GROUP BY COALESCE(category, 'general')
+  `,
+    [sinceExpr]
+  );
+
+  const globalConversionRow = await get(
+    `
+    SELECT
+      SUM(CASE WHEN event_type = 'affiliate_click' THEN 1 ELSE 0 END) AS successes,
+      SUM(CASE WHEN event_type IN ('catalog_load', 'intent_apply', 'similar_open', 'affiliate_click') THEN 1 ELSE 0 END) AS trials
+    FROM behavior_events
+    WHERE datetime(created_at) >= datetime('now', ?)
+  `,
+    [sinceExpr]
+  );
+
+  const productClicks = Object.fromEntries(
+    productClickRows.map((row) => [row.product_id, Number(row.clicks || 0)])
+  );
+  const categoryClicks = Object.fromEntries(
+    categoryClickRows.map((row) => [row.category, Number(row.clicks || 0)])
+  );
+  const categoryConversions = Object.fromEntries(
+    categoryConversionRows.map((row) => [
+      row.category,
+      {
+        successes: Number(row.successes || 0),
+        trials: Number(row.trials || 0)
+      }
+    ])
+  );
+
+  const totalClicks = categoryClickRows.reduce(
+    (sum, row) => sum + Number(row.clicks || 0),
+    0
+  );
+  const averageCategoryClicks =
+    categoryClickRows.length > 0 ? totalClicks / categoryClickRows.length : 0;
+
+  const globalSuccesses = Number(globalConversionRow?.successes || 0);
+  const globalTrials = Number(globalConversionRow?.trials || 0);
+  const empiricalConversionRate =
+    globalTrials > 0 ? globalSuccesses / globalTrials : Number(config.epcModel.amazonConversionRate || 0.09);
+
+  const priorAlpha = Number(config.revenueModel.bayesianPriorAlpha || 2);
+  const priorBeta = Number(config.revenueModel.bayesianPriorBeta || 38);
+
+  return {
+    lookbackDays: safeLookback,
+    totalClicks,
+    averageCategoryClicks,
+    productClicks,
+    categoryClicks,
+    categoryConversions,
+    priors: {
+      alpha: priorAlpha + empiricalConversionRate * 5,
+      beta: priorBeta + Math.max(1 - empiricalConversionRate, 0.01) * 5
+    }
+  };
+}
+
+async function getHotDeals(limit = 8) {
+  const rows = await all(
+    `
+    SELECT p.*, pt.last_price, pt.current_price, pt.drop_percent, pt.updated_at AS price_updated_at
+    FROM price_tracking pt
+    INNER JOIN products p ON p.id = pt.product_id
+    WHERE pt.is_hot_deal = 1
+    ORDER BY pt.drop_percent DESC, datetime(pt.updated_at) DESC
+    LIMIT ?
+  `,
+    [Number(limit)]
+  );
+
+  return rows.map((row) => ({
+    ...mapRowToProduct(row),
+    lastPrice: Number(row.last_price || row.price || 0),
+    currentPrice: Number(row.current_price || row.price || 0),
+    dropPercent: Number(row.drop_percent || 0),
+    priceUpdatedAt: row.price_updated_at || null,
+    hotDeal: true
+  }));
+}
+
+async function getHigherCommissionProducts(productId, limit = 6) {
+  const base = await getProductById(productId);
+  if (!base) {
+    return [];
+  }
+
+  const rows = await all(
+    `
+    SELECT *
+    FROM products
+    WHERE id != ?
+      AND category = ?
+      AND commission_rate > ?
+    ORDER BY commission_rate DESC, score DESC
+    LIMIT ?
+  `,
+    [productId, base.category, Number(base.commissionRate || 0), Number(limit)]
+  );
+
+  return rows.map(mapRowToProduct);
 }
 
 async function writeClickEvent(event) {
@@ -385,6 +611,65 @@ async function getShortlistBySlug(slug) {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+async function createNewsletterSignup(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+  if (!email) {
+    return null;
+  }
+
+  await run(
+    `
+    INSERT INTO newsletter_signups (email, source, status, metadata_json, updated_at)
+    VALUES (?, ?, 'active', ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(email) DO UPDATE SET
+      source = excluded.source,
+      status = 'active',
+      metadata_json = excluded.metadata_json,
+      updated_at = CURRENT_TIMESTAMP
+  `,
+    [email, payload.source || "homepage", JSON.stringify(payload.metadata || {})]
+  );
+
+  const row = await get(
+    `
+    SELECT id, email, source, status, created_at, updated_at
+    FROM newsletter_signups
+    WHERE email = ?
+  `,
+    [email]
+  );
+
+  return {
+    id: row?.id,
+    email: row?.email,
+    source: row?.source,
+    status: row?.status,
+    createdAt: row?.created_at,
+    updatedAt: row?.updated_at
+  };
+}
+
+async function getNewsletterSignups(limit = 100) {
+  const rows = await all(
+    `
+    SELECT id, email, source, status, created_at, updated_at
+    FROM newsletter_signups
+    ORDER BY id DESC
+    LIMIT ?
+  `,
+    [Number(limit)]
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    source: row.source,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }));
 }
 
 async function createPriceAlert(payload) {
@@ -2019,7 +2304,10 @@ async function getRevenueSimulationForecast(options = {}) {
       COALESCE(ace.region, 'US') AS region,
       COALESCE(p.category, 'general') AS category,
       COUNT(*) AS recent_clicks,
-      AVG(COALESCE(p.expected_revenue_per_click, 0)) AS avg_epc
+      AVG(COALESCE(p.expected_revenue_per_click, 0)) AS avg_epc,
+      AVG(COALESCE(p.price, 0)) AS avg_price,
+      AVG(COALESCE(p.conversion_probability, 0)) AS avg_conversion_probability,
+      AVG(COALESCE(p.modeled_commission_rate, p.commission_rate, 0)) AS avg_modeled_commission
     FROM affiliate_click_events ace
     LEFT JOIN products p ON p.id = ace.product_id
     WHERE datetime(ace.created_at) >= datetime('now', ?)
@@ -2036,6 +2324,9 @@ async function getRevenueSimulationForecast(options = {}) {
     SELECT
       category,
       AVG(COALESCE(expected_revenue_per_click, 0)) AS avg_epc,
+      AVG(COALESCE(price, 0)) AS avg_price,
+      AVG(COALESCE(conversion_probability, 0)) AS avg_conversion_probability,
+      AVG(COALESCE(modeled_commission_rate, commission_rate, 0)) AS avg_modeled_commission,
       COUNT(*) AS products_count
     FROM products
     GROUP BY category
@@ -2048,13 +2339,19 @@ async function getRevenueSimulationForecast(options = {}) {
         region: row.region,
         category: row.category,
         recentClicks: Number(row.recent_clicks || 0),
-        avgEpc: Number(row.avg_epc || 0)
+        avgEpc: Number(row.avg_epc || 0),
+        avgPrice: Number(row.avg_price || 0),
+        avgConversionProbability: Number(row.avg_conversion_probability || 0),
+        avgModeledCommission: Number(row.avg_modeled_commission || 0)
       }))
     : fallbackRows.map((row) => ({
         region: "US",
         category: row.category,
         recentClicks: Number(config.revenueSimulation.fallbackDailyClicks) * lookbackDays,
-        avgEpc: Number(row.avg_epc || 0)
+        avgEpc: Number(row.avg_epc || 0),
+        avgPrice: Number(row.avg_price || 0),
+        avgConversionProbability: Number(row.avg_conversion_probability || 0),
+        avgModeledCommission: Number(row.avg_modeled_commission || 0)
       }));
 
   const baselineScale = lookbackDays > 0 ? horizonDays / lookbackDays : 1;
@@ -2064,14 +2361,28 @@ async function getRevenueSimulationForecast(options = {}) {
 
   const breakdown = effectiveRows.map((row) => {
     const projectedClicksBase = row.recentClicks * baselineScale * growthFactor;
-    const baseRevenue = projectedClicksBase * row.avgEpc;
+    const modeledEpc =
+      Number(row.avgPrice || 0) *
+      Number(row.avgModeledCommission || 0) *
+      Number(row.avgConversionProbability || 0);
+    const confidence = Math.min(row.recentClicks / 120, 1);
+    const blendedEpc = Number(row.avgEpc || 0) * confidence + modeledEpc * (1 - confidence);
+    const projectedConversions = projectedClicksBase * Number(row.avgConversionProbability || 0);
+    const baseRevenue = projectedClicksBase * blendedEpc;
 
     return {
       region: row.region,
       category: row.category,
       recentClicks: row.recentClicks,
-      avgEpc: row.avgEpc,
+      avgEpc: blendedEpc,
+      observedEpc: Number(row.avgEpc || 0),
+      modeledEpc,
+      avgPrice: Number(row.avgPrice || 0),
+      avgConversionProbability: Number(row.avgConversionProbability || 0),
+      avgModeledCommission: Number(row.avgModeledCommission || 0),
+      confidence,
       projectedClicks: projectedClicksBase,
+      projectedConversions,
       projectedRevenue: {
         conservative: baseRevenue * conservativeMultiplier,
         base: baseRevenue,
@@ -2107,7 +2418,8 @@ async function getRevenueSimulationForecast(options = {}) {
       category: item.category,
       region: item.region,
       projectedRevenueBase: item.projectedRevenue.base,
-      projectedClicks: item.projectedClicks
+      projectedClicks: item.projectedClicks,
+      projectedConversions: item.projectedConversions
     }));
 
   return {
@@ -2125,6 +2437,153 @@ async function getRevenueSimulationForecast(options = {}) {
   };
 }
 
+function evaluateWeeklyRolloutRule(experimentSummary) {
+  const variants = Array.isArray(experimentSummary?.variants) ? experimentSummary.variants : [];
+  const control = variants.find((variant) => variant.isControl) || variants[0] || null;
+  const challenger = [...variants]
+    .filter((variant) => !variant.isControl)
+    .sort((first, second) => Number(second.conversionRate || 0) - Number(first.conversionRate || 0))[0];
+
+  const minRuntimeDays = Number(experimentSummary?.dynamicStopCriteria?.minRuntimeDays || 3);
+  const minSampleSize = Number(experimentSummary?.dynamicStopCriteria?.minSampleSize || 50);
+  const runtimeAndSamplePass =
+    variants.length > 0 && variants.every((variant) => Number(variant.impressions || 0) >= minSampleSize);
+
+  const significance = challenger?.significance || null;
+  const significancePass = Boolean(significance?.isRolloutEligible);
+  const lift = Number(challenger?.liftVsControl || 0);
+  const businessLiftPass = lift >= 0.1;
+
+  const eligibility = runtimeAndSamplePass && significancePass && businessLiftPass;
+
+  return {
+    candidateVariantKey: challenger?.variantKey || null,
+    runtimeAndSamplePass,
+    significancePass,
+    businessLiftPass,
+    required: {
+      minRuntimeDays,
+      minSampleSize,
+      minLift: 0.1,
+      pValueAlpha: Number(experimentSummary?.significanceModel?.alpha || 0.05),
+      bayesianMinProbability: Number(experimentSummary?.significanceModel?.bayesianMinProbability || 0.95)
+    },
+    observed: {
+      controlVariantKey: control?.variantKey || null,
+      candidateConversionRate: Number(challenger?.conversionRate || 0),
+      controlConversionRate: Number(control?.conversionRate || 0),
+      liftVsControl: lift,
+      pValueOneTailed: Number(significance?.pValueOneTailed || 1),
+      bayesianBeatProbability: Number(significance?.bayesianBeatProbability || 0),
+      isRolloutEligible: Boolean(significance?.isRolloutEligible)
+    },
+    recommendedAction: eligibility ? "rollout_candidate" : "continue_learning"
+  };
+}
+
+async function getWeeklyPmReport(options = {}) {
+  const windowDays = Number(options.windowDays || 7);
+  const experimentKey = options.experimentKey || "hero_cta_v1";
+
+  const [funnel, experimentSummary, revenue] = await Promise.all([
+    getFunnelSummary(windowDays),
+    getExperimentSummary(experimentKey, windowDays),
+    getRevenueSimulationForecast({
+      lookbackDays: windowDays,
+      horizonDays: windowDays,
+      clickGrowthRate: config.revenueSimulation.defaultClickGrowthRate
+    })
+  ]);
+
+  const newsletterRow = await get(
+    `
+    SELECT COUNT(*) AS signups
+    FROM newsletter_signups
+    WHERE datetime(created_at) >= datetime('now', ?)
+  `,
+    [`-${windowDays} day`]
+  );
+
+  const discoverySessions = Number(funnel?.stages?.discoverySessions || 0);
+  const affiliateClickSessions = Number(funnel?.stages?.affiliateClickSessions || 0);
+  const newsletterSignups = Number(newsletterRow?.signups || 0);
+  const discoveryToAffiliateClickRate =
+    discoverySessions > 0 ? affiliateClickSessions / discoverySessions : 0;
+  const emailCaptureRate = discoverySessions > 0 ? newsletterSignups / discoverySessions : 0;
+
+  const kpis = {
+    discoverySessions: {
+      current: discoverySessions,
+      target: 50,
+      met: discoverySessions >= 50
+    },
+    discoveryToAffiliateClickRate: {
+      current: Number(discoveryToAffiliateClickRate.toFixed(4)),
+      target: 0.025,
+      met: discoveryToAffiliateClickRate >= 0.025
+    },
+    emailCaptureRate: {
+      current: Number(emailCaptureRate.toFixed(4)),
+      target: 0.04,
+      met: emailCaptureRate >= 0.04
+    }
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    windowDays,
+    experimentKey,
+    kpis,
+    funnel,
+    experimentSummary,
+    rolloutRule: evaluateWeeklyRolloutRule(experimentSummary),
+    revenue: {
+      projectedBase: Number(revenue?.totals?.projectedRevenue?.base || 0),
+      projectedConservative: Number(revenue?.totals?.projectedRevenue?.conservative || 0),
+      projectedAggressive: Number(revenue?.totals?.projectedRevenue?.aggressive || 0),
+      projectedClicks: Number(revenue?.totals?.projectedClicks || 0)
+    },
+    suggestions: [
+      "If discoverySessions < 50, prioritize traffic and first-click UX experiments.",
+      "If discoveryToAffiliateClickRate < 2.5%, test CTA copy and recommendation placement.",
+      "If emailCaptureRate < 4%, tighten newsletter value proposition in hero and feed cards."
+    ]
+  };
+}
+
+async function getDbOverview() {
+  const tables = await all(
+    `
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%'
+    ORDER BY name ASC
+  `
+  );
+
+  const tableCounts = [];
+  let totalRows = 0;
+
+  for (const table of tables) {
+    const countRow = await get(`SELECT COUNT(*) AS count FROM ${table.name}`);
+    const count = Number(countRow?.count || 0);
+    totalRows += count;
+
+    tableCounts.push({
+      table: table.name,
+      rowCount: count
+    });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    tableCount: tableCounts.length,
+    totalRows,
+    tables: tableCounts
+  };
+}
+
 module.exports = {
   getAllProducts,
   getFilteredProducts,
@@ -2137,8 +2596,13 @@ module.exports = {
   getSyncLogs,
   getPriceChangeLogs,
   getDuplicateEvents,
+  getRevenueModelSignals,
+  getHotDeals,
+  getHigherCommissionProducts,
   getClickEvents,
   getClickSummary,
+  createNewsletterSignup,
+  getNewsletterSignups,
   createShortlist,
   updateShortlistBySlug,
   getShortlistBySlug,
@@ -2161,6 +2625,8 @@ module.exports = {
   updateExperimentLifecycle,
   updateExperimentGuardrails,
   getRevenueSimulationForecast,
+  getWeeklyPmReport,
+  getDbOverview,
   getFunnelSummary,
   evaluateAbandonedShortlistReminders,
   getShortlistReminderNotifications
