@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { fetchJson } from "../../lib/api";
+import { trackBehaviorEvent } from "../../lib/analytics";
 
 export default function ShortlistPage() {
   const [name, setName] = useState("My shortlist");
@@ -35,6 +37,17 @@ export default function ShortlistPage() {
           region: "US"
         })
       });
+
+      trackBehaviorEvent({
+        eventType: "shortlist_save",
+        metadata: {
+          shortlistName: name,
+          productCount: ids.length,
+          hasEmail: Boolean(email),
+          page: "shortlist"
+        }
+      });
+
       setSaved(payload.shortlist);
       setSlug(payload.shortlist.slug);
     } catch (requestError) {
@@ -127,13 +140,28 @@ export default function ShortlistPage() {
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
             {loaded.shortlist?.name} • {loaded.shortlist?.productIds?.length || 0} products
           </p>
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {(loaded.products || []).map((product) => (
               <li
                 key={`short-${product.id}`}
-                className="rounded-lg border border-slate-300/70 bg-white/70 px-3 py-2 text-sm text-slate-800 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+                className="rounded-xl border border-slate-300/70 bg-white/70 p-3 text-sm text-slate-800 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
               >
-                {product.name}
+                <Link href={`/product/${encodeURIComponent(product.id)}`} className="group block">
+                  <img
+                    src={product.image || "/file.svg"}
+                    alt={product.name}
+                    className="h-36 w-full rounded-lg object-cover"
+                  />
+                  <p className="mt-2 line-clamp-2 font-semibold text-slate-900 transition-colors group-hover:text-cyan-700 dark:text-white dark:group-hover:text-cyan-200">
+                    {product.name}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                    ${Number(product.price || 0).toFixed(2)}
+                  </p>
+                  <span className="mt-1 inline-flex text-xs font-semibold text-cyan-700 underline dark:text-cyan-200">
+                    View details
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

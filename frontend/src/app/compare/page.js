@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { fetchJson } from "../../lib/api";
+import { trackBehaviorEvent } from "../../lib/analytics";
 
 export default function ComparePage() {
   const [idsInput, setIdsInput] = useState("");
@@ -29,6 +30,16 @@ export default function ComparePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productIds })
       });
+
+      trackBehaviorEvent({
+        eventType: "compare_run",
+        metadata: {
+          comparedProductIds: productIds,
+          comparedCount: productIds.length,
+          page: "compare"
+        }
+      });
+
       setComparison(payload);
     } catch (requestError) {
       setError(requestError.message);

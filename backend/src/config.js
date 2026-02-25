@@ -28,6 +28,9 @@ if (process.env.COMMISSION_RULES_JSON) {
 const config = {
   port: Number(process.env.PORT || 4000),
   adminApiKey: process.env.ADMIN_API_KEY || "",
+  adminUsername: process.env.ADMIN_USERNAME || "admin",
+  adminPassword: process.env.ADMIN_PASSWORD || "pickfast-admin",
+  adminSessionTtlMinutes: Number(process.env.ADMIN_SESSION_TTL_MINUTES || 120),
   epcModel: {
     clickThroughRate: Number(process.env.EPC_CTR || 0.18),
     amazonConversionRate: Number(process.env.EPC_AMAZON_CVR || 0.09)

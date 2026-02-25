@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchJson, getApiBaseUrl, toSlug } from "../../lib/api";
 
@@ -79,7 +80,12 @@ export default function RecommendationsPage() {
         ) : null}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {hotDeals.map((product) => (
-            <article key={`deal-${product.id}`} className="glass rounded-xl p-4">
+            <article key={`deal-${product.id}`} className="glass relative rounded-xl p-4">
+              <img
+                src={product.image || "/file.svg"}
+                alt={product.name}
+                className="h-40 w-full rounded-xl object-cover"
+              />
               <p className="text-xs font-semibold text-rose-700 dark:text-rose-200">
                 ▼ {Number(product.dropPercent || 0).toFixed(1)}%
               </p>
@@ -93,10 +99,15 @@ export default function RecommendationsPage() {
                 href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_hotdeal_buy&pageType=recommendations`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="btn-micro mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
+                className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
               >
                 Claim Deal
               </a>
+              <Link
+                href={`/product/${encodeURIComponent(product.id)}`}
+                aria-label={`View details for ${product.name}`}
+                className="absolute inset-0 z-10 rounded-xl"
+              />
             </article>
           ))}
         </div>
@@ -106,7 +117,12 @@ export default function RecommendationsPage() {
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Top Recommendations</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {recommendations.map((product) => (
-            <article key={product.id} className="glass rounded-xl p-4">
+            <article key={product.id} className="glass relative rounded-xl p-4">
+              <img
+                src={product.image || "/file.svg"}
+                alt={product.name}
+                className="h-40 w-full rounded-xl object-cover"
+              />
               <h3 className="line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
                 {product.name}
               </h3>
@@ -120,10 +136,15 @@ export default function RecommendationsPage() {
                 href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_buy&pageType=recommendations`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="btn-micro mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
+                className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
               >
                 Buy on Amazon
               </a>
+              <Link
+                href={`/product/${encodeURIComponent(product.id)}`}
+                aria-label={`View details for ${product.name}`}
+                className="absolute inset-0 z-10 rounded-xl"
+              />
             </article>
           ))}
         </div>

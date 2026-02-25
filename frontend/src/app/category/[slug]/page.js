@@ -137,7 +137,12 @@ export default function CategoryPage() {
           </p>
         ) : null}
         {products.map((product) => (
-          <article key={product.id} className="glass rounded-2xl p-4">
+          <article key={product.id} className="glass relative rounded-2xl p-4">
+            <img
+              src={product.image || "/file.svg"}
+              alt={product.name}
+              className="h-40 w-full rounded-xl object-cover"
+            />
             <h2 className="line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
               {product.name}
             </h2>
@@ -148,10 +153,15 @@ export default function CategoryPage() {
               href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=category_buy&pageType=category`}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-micro mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
+              className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
             >
               Buy
             </a>
+            <Link
+              href={`/product/${encodeURIComponent(product.id)}`}
+              aria-label={`View details for ${product.name}`}
+              className="absolute inset-0 z-10 rounded-2xl"
+            />
           </article>
         ))}
       </section>

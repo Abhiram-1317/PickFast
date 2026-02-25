@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { fetchJson, getApiBaseUrl, toSlug } from "../../lib/api";
+import { getOrCreateSessionId, trackBehaviorEvent } from "../../lib/analytics";
 
 export default function DiscoverPage() {
   const [categories, setCategories] = useState([]);
@@ -51,6 +52,17 @@ export default function DiscoverPage() {
     if (budget) {
       params.set("maxPrice", budget);
     }
+
+    const hasFilters = Boolean(selectedCategory || budget);
+    trackBehaviorEvent({
+      eventType: hasFilters ? "intent_apply" : "catalog_load",
+      category: selectedCategory || null,
+      price: budget ? Number(budget) : null,
+      region,
+      metadata: {
+        page: "discover"
+      }
+    });
 
     fetchJson(`/api/products?${params.toString()}`)
       .then((payload) => {
@@ -160,8 +172,13 @@ export default function DiscoverPage() {
           {products.map((product) => (
             <article
               key={product.id}
-              className="glass card-micro overflow-hidden rounded-2xl"
+              className="glass card-micro relative overflow-hidden rounded-2xl"
             >
+              <img
+                src={product.image || "/file.svg"}
+                alt={product.name}
+                className="h-44 w-full object-cover"
+              />
               <div className="space-y-2 p-4">
                 <p className="text-xs text-slate-600 dark:text-slate-300">{product.category}</p>
                 <h3 className="line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
@@ -174,14 +191,32 @@ export default function DiscoverPage() {
                   Commission {(Number(product.commissionRate || 0) * 100).toFixed(1)}%
                 </p>
                 <a
-                  href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=discover_buy&pageType=discover`}
+                  href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=discover_buy&pageType=discover&sid=${encodeURIComponent(getOrCreateSessionId())}`}
+                  onClick={() => {
+                    trackBehaviorEvent({
+                      eventType: "affiliate_click",
+                      productId: product.id,
+                      category: product.category,
+                      price: Number(product.price || 0),
+                      region,
+                      metadata: {
+                        placement: "discover_buy",
+                        page: "discover"
+                      }
+                    });
+                  }}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="btn-micro inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
+                  className="btn-micro relative z-20 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
                 >
                   Buy on Amazon
                 </a>
               </div>
+              <Link
+                href={`/product/${encodeURIComponent(product.id)}`}
+                aria-label={`View details for ${product.name}`}
+                className="absolute inset-0 z-10 rounded-2xl"
+              />
             </article>
           ))}
         </div>

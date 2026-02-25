@@ -2255,6 +2255,16 @@ async function getFunnelSummary(days = 30) {
     [sinceExpr]
   );
 
+  const affiliateClickFallback = await get(
+    `
+    SELECT
+      COUNT(DISTINCT COALESCE(NULLIF(ip_hash, ''), NULLIF(source_url, ''), CAST(id AS TEXT))) AS sessions
+    FROM affiliate_click_events
+    WHERE datetime(created_at) >= datetime('now', ?)
+  `,
+    [sinceExpr]
+  );
+
   const totalClicks = await get(
     `
     SELECT COUNT(*) AS total_clicks
@@ -2267,7 +2277,9 @@ async function getFunnelSummary(days = 30) {
   const discoveryCount = Number(discovery?.sessions || 0);
   const engagedCount = Number(engaged?.sessions || 0);
   const shortlistCount = Number(shortlists?.sessions || 0);
-  const clickCount = Number(affiliateClicks?.sessions || 0);
+  const behaviorClickCount = Number(affiliateClicks?.sessions || 0);
+  const clickFallbackCount = Number(affiliateClickFallback?.sessions || 0);
+  const clickCount = behaviorClickCount > 0 ? behaviorClickCount : clickFallbackCount;
 
   return {
     windowDays: Number(days),

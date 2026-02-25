@@ -74,13 +74,67 @@ const port = config.port;
 app.use(cors());
 app.use(express.json());
 
-function ensureAdmin(req, res, next) {
-  if (!config.adminApiKey) {
-    next();
-    return;
+const adminSessions = new Map();
+
+function getAdminTokenFromRequest(req) {
+  const explicit = req.header("x-admin-token");
+  if (explicit) {
+    return explicit;
   }
 
-  if (req.header("x-admin-key") !== config.adminApiKey) {
+  const authorization = req.header("authorization") || "";
+  if (authorization.toLowerCase().startsWith("bearer ")) {
+    return authorization.slice(7).trim();
+  }
+
+  return "";
+}
+
+function issueAdminSessionToken(username) {
+  const token = crypto.randomBytes(24).toString("hex");
+  const ttlMinutes = Number(config.adminSessionTtlMinutes || 120);
+  const expiresAt = Date.now() + ttlMinutes * 60 * 1000;
+
+  adminSessions.set(token, {
+    username,
+    issuedAt: Date.now(),
+    expiresAt
+  });
+
+  return {
+    token,
+    expiresAt,
+    ttlMinutes
+  };
+}
+
+function validateAdminSessionToken(token) {
+  if (!token) {
+    return false;
+  }
+
+  const session = adminSessions.get(token);
+  if (!session) {
+    return false;
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    adminSessions.delete(token);
+    return false;
+  }
+
+  return true;
+}
+
+function ensureAdmin(req, res, next) {
+  const providedApiKey = req.header("x-admin-key") || "";
+  const providedToken = getAdminTokenFromRequest(req);
+
+  const hasApiKeyConfigured = Boolean(config.adminApiKey);
+  const keyValid = hasApiKeyConfigured && providedApiKey === config.adminApiKey;
+  const tokenValid = validateAdminSessionToken(providedToken);
+
+  if (!keyValid && !tokenValid) {
     res.status(401).json({ error: "Unauthorized. Missing or invalid x-admin-key" });
     return;
   }
@@ -597,6 +651,39 @@ app.post("/api/newsletter/signup", async (req, res) => {
   });
 
   res.status(201).json({ signup });
+});
+
+app.post("/api/admin/auth/login", (req, res) => {
+  const { username, password } = req.body || {};
+  const expectedUsername = String(config.adminUsername || "").trim();
+  const expectedPassword = String(config.adminPassword || "");
+
+  if (!expectedUsername || !expectedPassword) {
+    return res.status(503).json({ error: "Admin username/password not configured" });
+  }
+
+  if (String(username || "").trim() !== expectedUsername || String(password || "") !== expectedPassword) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
+
+  const session = issueAdminSessionToken(expectedUsername);
+
+  return res.json({
+    ok: true,
+    token: session.token,
+    username: expectedUsername,
+    expiresAt: new Date(session.expiresAt).toISOString(),
+    expiresInMinutes: session.ttlMinutes
+  });
+});
+
+app.post("/api/admin/auth/logout", ensureAdmin, (req, res) => {
+  const token = getAdminTokenFromRequest(req);
+  if (token) {
+    adminSessions.delete(token);
+  }
+
+  res.json({ ok: true });
 });
 
 app.post("/api/admin/sync/run", ensureAdmin, async (req, res) => {
