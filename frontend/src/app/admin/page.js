@@ -228,7 +228,7 @@ export default function AdminProductsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">Admin</p>
         <h1 className="text-3xl font-bold text-slate-900">Manual Products</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Use your Admin API key to create, edit, and delete products while PA-API access is pending.
+          Log in to add, edit, or delete products manually.
         </p>
       </header>
 
