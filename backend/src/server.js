@@ -186,6 +186,20 @@ function toSlug(value) {
     .replace(/(^-|-$)/g, "");
 }
 
+app.post("/api/admin/login", (req, res) => {
+  const { username, password } = req.body;
+  
+  // Use constant-time comparison in production ideally, but simple check is okay here
+  if (
+    username === config.adminUsername &&
+    password === config.adminPassword
+  ) {
+    return res.json({ success: true, apiKey: config.adminApiKey });
+  }
+  
+  return res.status(401).json({ error: "Invalid username or password" });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({
     ok: true,

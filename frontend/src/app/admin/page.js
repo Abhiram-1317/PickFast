@@ -43,6 +43,8 @@ const EMPTY_PRODUCT = {
 
 export default function AdminProductsPage() {
   const [apiKey, setApiKey] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [isAuthed, setIsAuthed] = useState(false);
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState(EMPTY_PRODUCT);
@@ -67,21 +69,49 @@ export default function AdminProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthed, apiKey]);
 
-  function handleKeySave(event) {
+  async function handleLogin(event) {
     event.preventDefault();
-    if (!apiKey.trim()) {
-      setError("Admin API key is required");
+    setError("");
+    setSuccess("");
+    
+    if (!username || !password) {
+      setError("Username and password are required");
       return;
     }
-    localStorage.setItem(ADMIN_KEY_STORAGE, apiKey.trim());
-    setIsAuthed(true);
-    setError("");
-    refreshProducts();
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload.error || "Login failed");
+      }
+
+      const key = payload.apiKey;
+      setApiKey(key);
+      localStorage.setItem(ADMIN_KEY_STORAGE, key);
+      setIsAuthed(true);
+      setError("");
+      setUsername("");
+      setPassword("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   function logout() {
     localStorage.removeItem(ADMIN_KEY_STORAGE);
     setIsAuthed(false);
+    setApiKey("");
+    setUsername("");
+    setPassword("");
     setProducts([]);
     setEditingId(null);
     setForm(EMPTY_PRODUCT);
@@ -203,21 +233,33 @@ export default function AdminProductsPage() {
       </header>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <form className="flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleKeySave}>
-          <input
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder="Enter Admin API key"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            type="password"
-          />
-          <div className="flex gap-2">
+        {!isAuthed ? (
+          <form className="flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleLogin}>
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:w-1/3"
+              type="text"
+            />
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm sm:w-1/3"
+              type="password"
+            />
             <button
               type="submit"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              disabled={loading}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             >
-              Save Key
+              Login
             </button>
+          </form>
+        ) : (
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-emerald-700">✓ Authenticated as Admin</p>
             <button
               type="button"
               onClick={logout}
@@ -226,11 +268,6 @@ export default function AdminProductsPage() {
               Logout
             </button>
           </div>
-        </form>
-        {!isAuthed ? (
-          <p className="mt-2 text-sm text-amber-700">Enter your Admin API key to unlock.</p>
-        ) : (
-          <p className="mt-2 text-sm text-emerald-700">Key saved locally. Requests include x-admin-key.</p>
         )}
       </section>
 
