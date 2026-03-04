@@ -282,6 +282,7 @@ export default function AdminProductsPage() {
         </p>
       ) : null}
 
+      {!isAuthed ? null : (
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">
@@ -364,7 +365,9 @@ export default function AdminProductsPage() {
           </button>
         </form>
       </section>
+      )}
 
+      {!isAuthed ? null : (
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">Products</h2>
@@ -378,9 +381,8 @@ export default function AdminProductsPage() {
           </button>
         </div>
 
-        {!isAuthed ? (
-          <p className="mt-3 text-sm text-slate-600">Enter your Admin API key to view products.</p>
-        ) : loading && products.length === 0 ? (
+
+        {loading && products.length === 0 ? (
           <p className="mt-3 text-sm text-slate-600">Loading products...</p>
         ) : products.length === 0 ? (
           <p className="mt-3 text-sm text-slate-600">No products yet. Create one above.</p>
@@ -418,6 +420,7 @@ export default function AdminProductsPage() {
           </div>
         )}
       </section>
+      )}
     </main>
   );
 }
