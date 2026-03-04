@@ -214,7 +214,7 @@ export default function HomeEngagementPanel({ initialProducts = [] }) {
                   ${Number(product.price || 0).toFixed(2)} • {(Number(product.commissionRate || 0) * 100).toFixed(1)}% commission
                 </div>
                 <a
-                  href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_recommendation_buy&pageType=home`}
+                  href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_recommendation_buy&pageType=home`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mt-1 inline-flex text-cyan-700 underline dark:text-cyan-200"

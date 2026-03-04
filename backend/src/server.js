@@ -46,27 +46,36 @@ const {
   getDbOverview,
   getFunnelSummary,
   evaluateAbandonedShortlistReminders,
-  getShortlistReminderNotifications
+  getShortlistReminderNotifications,
+  upsertProducts
 } = require("./db/productRepository");
 const {
-  bootstrapSeedDataIfEmpty,
   refreshCatalogScores,
   runAmazonSync,
-  startSyncScheduler
+  startSyncScheduler,
+  bootstrapSeedDataIfEmpty
 } = require("./jobs/syncJobs");
-const { getCommissionRules } = require("./services/commissionRules");
+const {
+  listAdminProducts,
+  createAdminProduct,
+  updateAdminProduct,
+  deleteAdminProduct
+} = require("./db/adminProducts");
+const { getCommissionRules, applyCommissionRules } = require("./services/commissionRules");
 const {
   withRegionAffiliateUrl,
   inferRegionFromRequest,
   normalizeRegion,
   buildAffiliateLink
 } = require("./services/affiliateLinks");
+const { ingestSingleAsin } = require("./services/amazonPaapi");
 const { buildIntentPages, getIntentBySlug } = require("./services/seoIntent");
 const {
   buildProfileFromEvents,
   getPersonalizedRecommendations
 } = require("./services/personalization");
 const { compareProducts, getSimilarProducts } = require("./services/recommendation");
+const { withScores } = require("./services/scoring");
 
 const app = express();
 const port = config.port;
@@ -137,6 +146,22 @@ function ensureAdmin(req, res, next) {
   if (!keyValid && !tokenValid) {
     res.status(401).json({ error: "Unauthorized. Missing or invalid x-admin-key" });
     return;
+  }
+
+  next();
+}
+
+function ensureAdminApiKey(req, res, next) {
+  const providedApiKey = req.header("x-admin-key") || "";
+  const bearer = (req.header("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  const candidate = providedApiKey || bearer;
+
+  if (!config.adminApiKey) {
+    return res.status(503).json({ error: "ADMIN_API_KEY not configured" });
+  }
+
+  if (candidate !== config.adminApiKey) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   next();
@@ -467,7 +492,7 @@ app.post("/api/track/click", async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/buy/:slug", async (req, res) => {
+async function handleBuyRedirect(req, res) {
   const { slug } = req.params;
   const region = normalizeRegion(req.query.region || inferRegionFromRequest(req));
   const pageType = req.query.pageType || "redirect";
@@ -504,7 +529,10 @@ app.get("/buy/:slug", async (req, res) => {
   });
 
   res.redirect(302, affiliateUrl);
-});
+}
+
+app.get("/buy/:slug", handleBuyRedirect);
+app.get("/api/buy/:slug", handleBuyRedirect);
 
 app.post("/api/behavior/track", async (req, res) => {
   const { sessionId, eventType, productId, category, price, region, metadata } = req.body || {};
@@ -651,6 +679,54 @@ app.post("/api/newsletter/signup", async (req, res) => {
   });
 
   res.status(201).json({ signup });
+});
+
+app.get("/api/admin/products", ensureAdminApiKey, async (_req, res) => {
+  const products = await listAdminProducts();
+  res.json({ products });
+});
+
+app.post("/api/admin/products", ensureAdminApiKey, async (req, res) => {
+  const result = await createAdminProduct(req.body || {});
+
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  res.status(201).json({ product: result.product });
+});
+
+app.put("/api/admin/products/:id", ensureAdminApiKey, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+
+  const result = await updateAdminProduct(id, req.body || {});
+
+  if (result.notFound) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  if (result.error) {
+    return res.status(400).json({ error: result.error });
+  }
+
+  res.json({ product: result.product });
+});
+
+app.delete("/api/admin/products/:id", ensureAdminApiKey, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({ error: "Invalid id" });
+  }
+
+  const result = await deleteAdminProduct(id);
+  if (!result.deleted) {
+    return res.status(404).json({ error: "Product not found" });
+  }
+
+  res.json({ ok: true });
 });
 
 app.post("/api/admin/auth/login", (req, res) => {
@@ -814,7 +890,13 @@ app.get("/api/admin/weekly-pm-report", ensureAdmin, async (req, res) => {
 
 app.get("/api/admin/db-overview", ensureAdmin, async (_req, res) => {
   const overview = await getDbOverview();
-  res.json(overview);
+  res.json({
+    ...overview,
+    paapi: {
+      enabled: config.amazon.paapiEnabled,
+      mode: config.amazon.paapiEnabled ? "enabled" : "disabled"
+    }
+  });
 });
 
 app.get("/api/admin/alerts/subscriptions", ensureAdmin, async (req, res) => {
@@ -825,6 +907,43 @@ app.get("/api/admin/alerts/subscriptions", ensureAdmin, async (req, res) => {
 app.get("/api/admin/newsletter/signups", ensureAdmin, async (req, res) => {
   const signups = await getNewsletterSignups(req.query.limit || 100);
   res.json({ signups });
+});
+
+app.post("/api/admin/products/import-asin", ensureAdmin, async (req, res) => {
+  const { asin, category, useCases } = req.body || {};
+
+  if (!asin) {
+    return res.status(400).json({ error: "asin is required" });
+  }
+
+  if (!config.amazon.paapiEnabled) {
+    return res.status(503).json({ error: "PA-API is disabled" });
+  }
+
+  try {
+    const normalizedUseCases = Array.isArray(useCases)
+      ? useCases.filter(Boolean)
+      : useCases
+        ? [useCases]
+        : undefined;
+
+    const product = await ingestSingleAsin(asin, {
+      category: category || undefined,
+      useCases: normalizedUseCases
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found from Amazon" });
+    }
+
+    const revenueSignals = await getRevenueModelSignals(config.revenueModel.lookbackDays);
+    const scored = withScores(applyCommissionRules([product]), { revenueSignals });
+    await upsertProducts(scored, "admin");
+
+    res.json({ ok: true, imported: scored[0] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/admin/alerts/notifications", ensureAdmin, async (req, res) => {

@@ -31,7 +31,7 @@ export default async function ProductDetailPage({ params }) {
   const product = payload.product;
   const similarProducts = payload.similarProducts || [];
   const higherCommissionProducts = payload.higherCommissionProducts || [];
-  const buyUrl = `${getApiBaseUrl()}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=product_detail_buy&pageType=product`;
+  const buyUrl = `${getApiBaseUrl()}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=product_detail_buy&pageType=product`;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">

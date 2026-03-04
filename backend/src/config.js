@@ -77,6 +77,9 @@ const config = {
     .map((item) => item.trim())
     .filter(Boolean),
   amazon: {
+    paapiEnabled: !["0", "false", "off", "no"].includes(
+      String(process.env.AMAZON_PAAPI_ENABLED || "true").toLowerCase()
+    ),
     accessKey: process.env.AMAZON_ACCESS_KEY || "",
     secretKey: process.env.AMAZON_SECRET_KEY || "",
     partnerTag: process.env.AMAZON_PARTNER_TAG || "",

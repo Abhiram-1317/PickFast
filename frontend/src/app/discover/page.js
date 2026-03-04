@@ -191,7 +191,7 @@ export default function DiscoverPage() {
                   Commission {(Number(product.commissionRate || 0) * 100).toFixed(1)}%
                 </p>
                 <a
-                  href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=discover_buy&pageType=discover&sid=${encodeURIComponent(getOrCreateSessionId())}`}
+                  href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=discover_buy&pageType=discover&sid=${encodeURIComponent(getOrCreateSessionId())}`}
                   onClick={() => {
                     trackBehaviorEvent({
                       eventType: "affiliate_click",

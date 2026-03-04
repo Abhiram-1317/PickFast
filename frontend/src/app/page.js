@@ -118,7 +118,7 @@ export default async function HomePage() {
                 ${Number(spotlight.price || 0).toFixed(2)}
               </p>
               <a
-                href={`${apiBaseUrl}/buy/${toSlug(spotlight.name)}?pid=${encodeURIComponent(spotlight.id)}&region=US&placement=home_spotlight_buy&pageType=home`}
+                href={`${apiBaseUrl}/api/buy/${toSlug(spotlight.name)}?pid=${encodeURIComponent(spotlight.id)}&region=US&placement=home_spotlight_buy&pageType=home`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-micro mt-3 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
@@ -185,7 +185,7 @@ export default async function HomePage() {
                   ${Number(product.price || 0).toFixed(2)}
                 </p>
                 <a
-                  href={`${apiBaseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_top_picks_buy&pageType=home`}
+                  href={`${apiBaseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_top_picks_buy&pageType=home`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
@@ -235,7 +235,7 @@ export default async function HomePage() {
                   EPC {Number(product.expectedRevenuePerClick || 0).toFixed(4)} • Score {Number(product.score || 0).toFixed(2)}
                 </p>
                 <a
-                  href={`${apiBaseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_best_seller_buy&pageType=home`}
+                  href={`${apiBaseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_best_seller_buy&pageType=home`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-micro relative z-20 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"

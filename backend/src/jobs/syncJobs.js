@@ -57,6 +57,26 @@ async function refreshCatalogScores() {
 }
 
 async function runAmazonSync() {
+  if (!config.amazon.paapiEnabled) {
+    const message = "Amazon sync skipped because AMAZON_PAAPI_ENABLED is disabled.";
+
+    await writeSyncLog({
+      status: "skipped",
+      source: "amazon",
+      importedCount: 0,
+      message
+    });
+
+    return {
+      ok: true,
+      skipped: true,
+      importedCount: 0,
+      duplicateEventsTracked: 0,
+      reason: "paapi_disabled",
+      message
+    };
+  }
+
   try {
     const { products, duplicates } = await ingestFromAmazonKeywords(config.syncKeywords);
     const importedCount = await persistWithRecalculatedScores(products, "amazon");

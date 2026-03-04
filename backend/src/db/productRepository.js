@@ -2,6 +2,13 @@ const { all, get, run } = require("./database");
 const crypto = require("crypto");
 const { config } = require("../config");
 
+function toSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 function mapRowToProduct(row) {
   if (!row) {
     return null;
@@ -9,8 +16,11 @@ function mapRowToProduct(row) {
 
   return {
     id: row.id,
+    slug: row.slug,
     name: row.name,
+    description: row.description,
     category: row.category,
+    asin: row.asin,
     brand: row.brand,
     price: row.price,
     originalPrice: row.original_price,
@@ -196,19 +206,25 @@ async function upsertProducts(products, source = "seed") {
       [product.id, lastPrice, currentPrice, dropPercent, isHotDeal, source]
     );
 
+    const slug = product.slug || toSlug(product.name || product.id);
+    const description = product.description || null;
+
     await run(
       `
       INSERT INTO products (
-        id, name, category, brand, price, original_price, rating, review_count,
+        id, slug, name, description, category, brand, asin, price, original_price, rating, review_count,
         commission_rate, monthly_sales_estimate, stock_status, trend_score,
         specs_json, use_cases_json, amazon_url, image, source, score, epc_score, expected_revenue_per_click,
         conversion_probability, modeled_commission_rate, estimated_commission_value,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
+        slug = excluded.slug,
         name = excluded.name,
+        description = excluded.description,
         category = excluded.category,
         brand = excluded.brand,
+        asin = excluded.asin,
         price = excluded.price,
         original_price = excluded.original_price,
         rating = excluded.rating,
@@ -232,9 +248,12 @@ async function upsertProducts(products, source = "seed") {
     `,
       [
         product.id,
+        slug,
         product.name,
+        description,
         product.category,
         product.brand || null,
+        product.asin || null,
         product.price,
         product.originalPrice || null,
         product.rating || 0,

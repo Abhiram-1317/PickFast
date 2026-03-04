@@ -43,7 +43,6 @@ function inferRegionFromRequest(req) {
 
 function buildAffiliateLink(baseAmazonUrl, region) {
   const safeRegion = normalizeRegion(region);
-  const host = config.regionAffiliate.hosts[safeRegion] || config.regionAffiliate.hosts.US;
   const tag = config.regionAffiliate.tags[safeRegion] || config.regionAffiliate.tags.US;
 
   if (!baseAmazonUrl) {
@@ -52,7 +51,8 @@ function buildAffiliateLink(baseAmazonUrl, region) {
 
   try {
     const parsed = new URL(baseAmazonUrl);
-    parsed.hostname = host;
+    // Preserve the original marketplace host (e.g., .in) so we don't break ASIN availability;
+    // just enforce the correct affiliate tag.
     parsed.searchParams.set("tag", tag);
     return parsed.toString();
   } catch (error) {

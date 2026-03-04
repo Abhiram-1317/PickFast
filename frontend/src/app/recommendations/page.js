@@ -96,7 +96,7 @@ export default function RecommendationsPage() {
                 Was ${Number(product.lastPrice || 0).toFixed(2)} → Now ${Number(product.currentPrice || 0).toFixed(2)}
               </p>
               <a
-                href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_hotdeal_buy&pageType=recommendations`}
+                href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_hotdeal_buy&pageType=recommendations`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
@@ -133,7 +133,7 @@ export default function RecommendationsPage() {
                 ${Number(product.price || 0).toFixed(2)}
               </p>
               <a
-                href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_buy&pageType=recommendations`}
+                href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_buy&pageType=recommendations`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"

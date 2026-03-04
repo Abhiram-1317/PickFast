@@ -1,608 +1,386 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getApiBaseUrl } from "../../lib/api";
 
-const ADMIN_TOKEN_STORAGE = "pickfast_admin_token";
-const ADMIN_USERNAME_STORAGE = "pickfast_admin_username";
+const ADMIN_KEY_STORAGE = "pickfast_admin_api_key";
 
-async function fetchAdminJson(path, authToken) {
-  const headers = {};
-  if (authToken) {
-    headers["x-admin-token"] = authToken;
+function buildHeaders(apiKey, extra = {}) {
+  const headers = { ...(extra || {}) };
+  if (apiKey) {
+    headers["x-admin-key"] = apiKey;
   }
+  return headers;
+}
 
+async function requestJson(path, options = {}, apiKey) {
   const response = await fetch(`${getApiBaseUrl()}${path}`, {
-    headers,
+    ...options,
+    headers: buildHeaders(apiKey, {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }),
     cache: "no-store"
   });
 
   const payload = await response.json().catch(() => ({}));
-
   if (!response.ok) {
     throw new Error(payload.error || `Request failed (${response.status})`);
   }
-
   return payload;
 }
 
-const EMPTY_DASHBOARD = {
-  dbOverview: null,
-  weeklyPm: null,
-  funnel: null,
-  revenue: null,
-  syncLogs: null,
-  newsletter: null,
-  alerts: null,
-  reminders: null
+const EMPTY_PRODUCT = {
+  title: "",
+  description: "",
+  price: "",
+  image_url: "",
+  category: "",
+  asin: "",
+  amazon_url: "",
+  rating: ""
 };
 
-export default function AdminDashboardPage() {
-  const mountedRef = useRef(true);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [authToken, setAuthToken] = useState("");
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+export default function AdminProductsPage() {
+  const [apiKey, setApiKey] = useState("");
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [form, setForm] = useState(EMPTY_PRODUCT);
+  const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [data, setData] = useState(EMPTY_DASHBOARD);
+  const [success, setSuccess] = useState("");
 
-  const stats = useMemo(
-    () => ({
-      syncLogCount: data.syncLogs?.logs?.length || 0,
-      newsletterCount: data.newsletter?.signups?.length || 0,
-      alertsCount: data.alerts?.alerts?.length || 0,
-      remindersCount: data.reminders?.notifications?.length || 0,
-      topCategoryRevenue: data.revenue?.topCategories?.slice(0, 5) || [],
-      topPlacements: data.clickSummary?.topPlacements?.slice(0, 6) || []
-    }),
-    [data]
-  );
+  const isEditing = useMemo(() => editingId !== null, [editingId]);
 
-  const loadDashboard = useCallback(async (token) => {
-    try {
-      const [
-        dbOverview,
-        weeklyPm,
-        funnel,
-        revenue,
-        clickSummary,
-        syncLogs,
-        newsletter,
-        alerts,
-        reminders
-      ] = await Promise.all([
-          fetchAdminJson("/api/admin/db-overview", token),
-          fetchAdminJson(
-            "/api/admin/weekly-pm-report?windowDays=7&experimentKey=hero_cta_v1",
-            token
-          ),
-          fetchAdminJson("/api/admin/funnel/summary?days=30", token),
-          fetchAdminJson(
-            "/api/admin/revenue/simulation?lookbackDays=30&horizonDays=30",
-            token
-          ),
-          fetchAdminJson("/api/admin/clicks/summary?days=30", token),
-          fetchAdminJson("/api/admin/sync/logs?limit=5", token),
-          fetchAdminJson("/api/admin/newsletter/signups?limit=10", token),
-          fetchAdminJson("/api/admin/alerts/subscriptions?limit=10", token),
-          fetchAdminJson("/api/admin/reminders/notifications?limit=10", token)
-        ]);
-
-      if (!mountedRef.current) {
-        return;
-      }
-
-      setData({
-        dbOverview,
-        weeklyPm,
-        funnel,
-        revenue,
-        clickSummary,
-        syncLogs,
-        newsletter,
-        alerts,
-        reminders
-      });
-      setError("");
-    } catch (requestError) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setError(requestError.message);
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
+  useEffect(() => {
+    const storedKey = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
+    if (storedKey) {
+      setApiKey(storedKey);
+      setIsAuthed(true);
     }
   }, []);
 
-  function refreshDashboard() {
-    if (!isUnlocked) {
+  useEffect(() => {
+    if (!isAuthed || !apiKey) return;
+    refreshProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthed, apiKey]);
+
+  function handleKeySave(event) {
+    event.preventDefault();
+    if (!apiKey.trim()) {
+      setError("Admin API key is required");
       return;
     }
-
+    localStorage.setItem(ADMIN_KEY_STORAGE, apiKey.trim());
+    setIsAuthed(true);
     setError("");
-    setLoading(true);
-    loadDashboard(authToken);
+    refreshProducts();
   }
 
-  async function handleLogin(event) {
+  function logout() {
+    localStorage.removeItem(ADMIN_KEY_STORAGE);
+    setIsAuthed(false);
+    setProducts([]);
+    setEditingId(null);
+    setForm(EMPTY_PRODUCT);
+    setError("");
+    setSuccess("");
+  }
+
+  async function refreshProducts() {
+    if (!apiKey) return;
+    setLoading(true);
+    setError("");
+    try {
+      const payload = await requestJson("/api/admin/products", { method: "GET" }, apiKey);
+      setProducts(payload.products || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function updateField(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function startEdit(product) {
+    setEditingId(product.id);
+    setForm({
+      title: product.title || "",
+      description: product.description || "",
+      price: product.price ?? "",
+      image_url: product.imageUrl || "",
+      category: product.category || "",
+      asin: product.asin || "",
+      amazon_url: product.amazonUrl || "",
+      rating: product.rating ?? ""
+    });
+    setSuccess("");
+    setError("");
+  }
+
+  function resetForm() {
+    setEditingId(null);
+    setForm(EMPTY_PRODUCT);
+    setSuccess("");
+  }
+
+  async function handleSubmit(event) {
     event.preventDefault();
-
-    const normalizedUsername = String(username || "").trim();
-    const normalizedPassword = String(password || "");
-
-    if (!normalizedUsername || !normalizedPassword) {
-      setError("Username and password are required.");
+    if (!apiKey) {
+      setError("Enter Admin API key first");
       return;
     }
 
+    setLoading(true);
     setError("");
-    setIsLoggingIn(true);
+    setSuccess("");
 
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/admin/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: normalizedUsername,
-          password: normalizedPassword
-        })
-      });
+      const payload = {
+        ...form,
+        price: form.price === "" ? "" : Number(form.price),
+        rating: form.rating === "" ? null : Number(form.rating)
+      };
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || "Login failed");
-      }
-
-      if (!mountedRef.current) {
-        return;
-      }
-
-      const token = String(payload.token || "");
-      if (!token) {
-        throw new Error("Missing session token from login response");
-      }
-
-      localStorage.setItem(ADMIN_TOKEN_STORAGE, token);
-      localStorage.setItem(ADMIN_USERNAME_STORAGE, normalizedUsername);
-
-      setAuthToken(token);
-      setIsUnlocked(true);
-      setLoading(true);
-      setPassword("");
-      await loadDashboard(token);
-    } catch (requestError) {
-      if (!mountedRef.current) {
-        return;
-      }
-      setError(requestError.message);
-      setIsUnlocked(false);
-      setAuthToken("");
-      setData(EMPTY_DASHBOARD);
-    } finally {
-      if (mountedRef.current) {
-        setIsLoggingIn(false);
-      }
-    }
-  }
-
-  async function lockDashboard() {
-    if (authToken) {
-      try {
-        await fetch(`${getApiBaseUrl()}/api/admin/auth/logout`, {
+      if (isEditing) {
+        await requestJson(`/api/admin/products/${editingId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload)
+        }, apiKey);
+        setSuccess("Product updated");
+      } else {
+        await requestJson("/api/admin/products", {
           method: "POST",
-          headers: {
-            "x-admin-token": authToken
-          }
-        });
-      } catch (_error) {
+          body: JSON.stringify(payload)
+        }, apiKey);
+        setSuccess("Product created");
       }
+
+      resetForm();
+      await refreshProducts();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
     }
-
-    localStorage.removeItem(ADMIN_TOKEN_STORAGE);
-    localStorage.removeItem(ADMIN_USERNAME_STORAGE);
-
-    setIsUnlocked(false);
-    setLoading(false);
-    setError("");
-    setAuthToken("");
-    setPassword("");
-    setData(EMPTY_DASHBOARD);
   }
 
-  useEffect(() => {
-    const storedUsername = localStorage.getItem(ADMIN_USERNAME_STORAGE) || "";
-    const storedToken = localStorage.getItem(ADMIN_TOKEN_STORAGE) || "";
+  async function handleDelete(id) {
+    if (!apiKey) return;
+    const confirmDelete = window.confirm("Delete this product?");
+    if (!confirmDelete) return;
 
-    if (storedUsername) {
-      setUsername(storedUsername);
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await requestJson(`/api/admin/products/${id}`, { method: "DELETE" }, apiKey);
+      if (editingId === id) {
+        resetForm();
+      }
+      await refreshProducts();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
     }
-
-    if (storedToken) {
-      setAuthToken(storedToken);
-      setIsUnlocked(true);
-      setLoading(true);
-      loadDashboard(storedToken);
-    }
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [loadDashboard]);
+  }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">
-          Admin Console
+    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-8">
+      <header>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-600">Admin</p>
+        <h1 className="text-3xl font-bold text-slate-900">Manual Products</h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Use your Admin API key to create, edit, and delete products while PA-API access is pending.
         </p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
-          PickFast Admin Dashboard
-        </h1>
-        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-          View sync activity, funnel health, PM report, revenue simulation, and subscriptions in one
-          place.
-        </p>
+      </header>
 
-        <form onSubmit={handleLogin} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <form className="flex flex-col gap-3 sm:flex-row sm:items-center" onSubmit={handleKeySave}>
           <input
-            suppressHydrationWarning
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="Admin username"
-            className="rounded-xl border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-white/15 dark:bg-slate-900/70 dark:text-slate-100"
-          />
-          <input
-            suppressHydrationWarning
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            placeholder="Enter Admin API key"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Admin password"
-            className="rounded-xl border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-white/15 dark:bg-slate-900/70 dark:text-slate-100"
           />
-          <button
-            suppressHydrationWarning
-            type="submit"
-            disabled={isLoggingIn}
-            className="btn-micro rounded-lg bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isLoggingIn ? "Signing in..." : isUnlocked ? "Re-Login" : "Login"}
-          </button>
-          <button
-            suppressHydrationWarning
-            type="button"
-            onClick={lockDashboard}
-            disabled={!isUnlocked}
-            className="btn-micro rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-          >
-            Logout
-          </button>
-        </form>
-
-        {!isUnlocked ? (
-          <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-            Admin dashboard is locked. Login with username and password to load data.
-          </p>
-        ) : (
-          <button
-            type="button"
-            onClick={refreshDashboard}
-            className="btn-micro mt-3 rounded-lg border border-slate-300/80 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-white/15 dark:bg-white/5 dark:text-slate-100"
-          >
-            Refresh Data
-          </button>
-        )}
-
-        {loading ? (
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">Loading admin dashboard...</p>
-        ) : null}
-
-        {error ? (
-          <p className="mt-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-            {error.includes("Unauthorized")
-              ? "Unauthorized. Enter ADMIN_API_KEY in the field above and click Admin Login."
-              : error}
-          </p>
-        ) : null}
-
-        {!loading && !error && isUnlocked ? (
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <article className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Sync Logs</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">{stats.syncLogCount}</p>
-            </article>
-            <article className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Newsletter Signups</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">{stats.newsletterCount}</p>
-            </article>
-            <article className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Price Alerts</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">{stats.alertsCount}</p>
-            </article>
-            <article className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Reminder Notifications</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">{stats.remindersCount}</p>
-            </article>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Save Key
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+            >
+              Logout
+            </button>
           </div>
-        ) : null}
+        </form>
+        {!isAuthed ? (
+          <p className="mt-2 text-sm text-amber-700">Enter your Admin API key to unlock.</p>
+        ) : (
+          <p className="mt-2 text-sm text-emerald-700">Key saved locally. Requests include x-admin-key.</p>
+        )}
       </section>
 
-      {isUnlocked ? (
-        <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <GraphCard title="Funnel Stages (30d)">
-            <HorizontalBars
-              items={[
-                { label: "Discovery", value: Number(data.funnel?.stages?.discoverySessions || 0) },
-                { label: "Engaged", value: Number(data.funnel?.stages?.engagedSessions || 0) },
-                { label: "Shortlist", value: Number(data.funnel?.stages?.shortlistSessions || 0) },
-                {
-                  label: "Affiliate Click",
-                  value: Number(data.funnel?.stages?.affiliateClickSessions || 0)
-                }
-              ]}
-              valueFormatter={(value) => value.toLocaleString()}
-              barClassName="bg-cyan-500"
-            />
-          </GraphCard>
-
-          <GraphCard title="Revenue Scenarios (30d)">
-            <HorizontalBars
-              items={[
-                {
-                  label: "Conservative",
-                  value: Number(data.revenue?.totals?.projectedRevenue?.conservative || 0)
-                },
-                {
-                  label: "Base",
-                  value: Number(data.revenue?.totals?.projectedRevenue?.base || 0)
-                },
-                {
-                  label: "Aggressive",
-                  value: Number(data.revenue?.totals?.projectedRevenue?.aggressive || 0)
-                }
-              ]}
-              valueFormatter={(value) => `$${value.toFixed(2)}`}
-              barClassName="bg-emerald-500"
-            />
-          </GraphCard>
-
-          <GraphCard title="Top Category Revenue">
-            <HorizontalBars
-              items={stats.topCategoryRevenue.map((item) => ({
-                label: `${item.category} (${item.region})`,
-                value: Number(item.projectedRevenueBase || 0)
-              }))}
-              valueFormatter={(value) => `$${value.toFixed(2)}`}
-              barClassName="bg-violet-500"
-            />
-          </GraphCard>
-
-          <GraphCard title="Top Placements by Clicks">
-            <HorizontalBars
-              items={stats.topPlacements.map((item) => ({
-                label: item.placement || "unknown",
-                value: Number(item.clicks || 0)
-              }))}
-              valueFormatter={(value) => value.toLocaleString()}
-              barClassName="bg-amber-500"
-            />
-          </GraphCard>
-
-          <OverviewCard overview={data.dbOverview} />
-          <WeeklyPmCard report={data.weeklyPm} />
-          <FunnelCard funnel={data.funnel} />
-          <RevenueCard revenue={data.revenue} />
-          <ClickSummaryCard summary={data.clickSummary} />
-          <ActivityCard title="Sync Logs (latest 5)" items={data.syncLogs?.logs || []} />
-          <ActivityCard title="Newsletter Signups (latest 10)" items={data.newsletter?.signups || []} />
-          <ActivityCard title="Price Alert Subscriptions (latest 10)" items={data.alerts?.alerts || []} />
-          <ActivityCard title="Reminder Notifications (latest 10)" items={data.reminders?.notifications || []} />
-        </section>
+      {error ? (
+        <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </p>
       ) : null}
-    </main>
-  );
-}
+      {success ? (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+          {success}
+        </p>
+      ) : null}
 
-function GraphCard({ title, children }) {
-  return (
-    <article className="glass rounded-2xl p-4">
-      <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
-      <div className="mt-3">{children}</div>
-    </article>
-  );
-}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">
+            {isEditing ? "Edit product" : "New product"}
+          </h2>
+          {isEditing ? (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="text-sm font-semibold text-slate-600"
+            >
+              Cancel edit
+            </button>
+          ) : null}
+        </div>
 
-function HorizontalBars({ items, valueFormatter, barClassName }) {
-  const validItems = Array.isArray(items) ? items.filter((item) => Number(item.value || 0) >= 0) : [];
-  const maxValue = validItems.length
-    ? Math.max(...validItems.map((item) => Number(item.value || 0)), 1)
-    : 1;
+        <form className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleSubmit}>
+          <input
+            required
+            value={form.title}
+            onChange={(event) => updateField("title", event.target.value)}
+            placeholder="Title *"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            required
+            value={form.amazon_url}
+            onChange={(event) => updateField("amazon_url", event.target.value)}
+            placeholder="Amazon URL *"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            required
+            type="number"
+            step="0.01"
+            value={form.price}
+            onChange={(event) => updateField("price", event.target.value)}
+            placeholder="Price *"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            type="number"
+            step="0.1"
+            value={form.rating}
+            onChange={(event) => updateField("rating", event.target.value)}
+            placeholder="Rating (optional)"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            value={form.category}
+            onChange={(event) => updateField("category", event.target.value)}
+            placeholder="Category"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            value={form.asin}
+            onChange={(event) => updateField("asin", event.target.value)}
+            placeholder="ASIN"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <input
+            value={form.image_url}
+            onChange={(event) => updateField("image_url", event.target.value)}
+            placeholder="Image URL"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <textarea
+            value={form.description}
+            onChange={(event) => updateField("description", event.target.value)}
+            placeholder="Description"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm sm:col-span-2"
+            rows={3}
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="sm:col-span-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {isEditing ? "Update product" : "Create product"}
+          </button>
+        </form>
+      </section>
 
-  if (!validItems.length) {
-    return <p className="text-sm text-slate-600 dark:text-slate-300">No data available.</p>;
-  }
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Products</h2>
+          <button
+            type="button"
+            onClick={refreshProducts}
+            className="text-sm font-semibold text-slate-600"
+            disabled={loading}
+          >
+            Refresh
+          </button>
+        </div>
 
-  return (
-    <div className="space-y-2">
-      {validItems.map((item) => {
-        const value = Number(item.value || 0);
-        const widthPercent = Math.max((value / maxValue) * 100, 3);
-
-        return (
-          <div key={`${item.label}-${value}`} className="space-y-1">
-            <div className="flex items-center justify-between gap-3 text-xs text-slate-700 dark:text-slate-200">
-              <span className="truncate">{item.label}</span>
-              <span className="font-semibold">{valueFormatter(value)}</span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-200/80 dark:bg-white/10">
-              <div className={`h-2 rounded-full ${barClassName}`} style={{ width: `${widthPercent}%` }} />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function DataCard({ title, children, rawPayload }) {
-  return (
-    <article className="glass rounded-2xl p-4">
-      <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
-      <div className="mt-3 space-y-3">{children}</div>
-      <details className="mt-3 rounded-lg border border-slate-300/70 bg-white/70 p-3 text-xs dark:border-white/10 dark:bg-white/5">
-        <summary className="cursor-pointer font-semibold text-slate-700 dark:text-slate-200">Raw JSON</summary>
-        <pre className="soft-scroll mt-2 max-h-56 overflow-auto text-xs text-slate-700 dark:text-slate-200">
-          {JSON.stringify(rawPayload || {}, null, 2)}
-        </pre>
-      </details>
-    </article>
-  );
-}
-
-function StatLine({ label, value }) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-sm">
-      <span className="text-slate-600 dark:text-slate-300">{label}</span>
-      <span className="font-semibold text-slate-900 dark:text-white">{value}</span>
-    </div>
-  );
-}
-
-function formatPercent(value) {
-  return `${(Number(value || 0) * 100).toFixed(2)}%`;
-}
-
-function formatMoney(value) {
-  return `$${Number(value || 0).toFixed(2)}`;
-}
-
-function OverviewCard({ overview }) {
-  const tables = overview?.tables || [];
-  return (
-    <DataCard title="DB Overview" rawPayload={overview}>
-      <StatLine label="Generated" value={overview?.generatedAt || "-"} />
-      <StatLine label="Total Tables" value={Number(overview?.tableCount || 0).toLocaleString()} />
-      <StatLine label="Total Rows" value={Number(overview?.totalRows || 0).toLocaleString()} />
-      <div className="soft-scroll max-h-56 overflow-auto rounded-lg border border-slate-300/70 dark:border-white/10">
-        <table className="min-w-full text-left text-xs">
-          <thead className="bg-slate-100/60 text-slate-700 dark:bg-white/5 dark:text-slate-200">
-            <tr>
-              <th className="px-3 py-2">Table</th>
-              <th className="px-3 py-2">Rows</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tables.map((item) => (
-              <tr key={item.table} className="border-t border-slate-200/80 dark:border-white/10">
-                <td className="px-3 py-2">{item.table}</td>
-                <td className="px-3 py-2">{Number(item.rowCount || 0).toLocaleString()}</td>
-              </tr>
+        {!isAuthed ? (
+          <p className="mt-3 text-sm text-slate-600">Enter your Admin API key to view products.</p>
+        ) : loading && products.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-600">Loading products...</p>
+        ) : products.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-600">No products yet. Create one above.</p>
+        ) : (
+          <div className="mt-4 divide-y divide-slate-100 border border-slate-200">
+            {products.map((product) => (
+              <div key={product.id} className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{product.title}</p>
+                  <p className="text-xs text-slate-500">Slug: {product.slug}</p>
+                  <p className="text-xs text-slate-500">Price: {product.price}</p>
+                  <p className="text-xs text-slate-500">Amazon: {product.amazonUrl}</p>
+                  {product.category ? (
+                    <p className="text-xs text-slate-500">Category: {product.category}</p>
+                  ) : null}
+                </div>
+                <div className="flex gap-2 justify-start sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(product)}
+                    className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(product.id)}
+                    className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </DataCard>
-  );
-}
-
-function WeeklyPmCard({ report }) {
-  const kpis = report?.kpis || {};
-  const rollout = report?.rolloutRule || {};
-  return (
-    <DataCard title="Weekly PM Report (7d)" rawPayload={report}>
-      <StatLine label="Window Days" value={Number(report?.windowDays || 0)} />
-      <StatLine label="Experiment" value={report?.experimentKey || "-"} />
-      <StatLine label="Action" value={rollout?.recommendedAction || "-"} />
-      <StatLine label="Candidate Variant" value={rollout?.candidateVariantKey || "-"} />
-      <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 text-xs dark:border-white/10 dark:bg-white/5">
-        <p className="font-semibold text-slate-800 dark:text-slate-100">KPI Performance</p>
-        <p className="mt-1 text-slate-600 dark:text-slate-300">
-          Discovery: {kpis.discoverySessions?.current || 0} / {kpis.discoverySessions?.target || 0}
-        </p>
-        <p className="text-slate-600 dark:text-slate-300">
-          Discovery → Click: {formatPercent(kpis.discoveryToAffiliateClickRate?.current)} / target {formatPercent(kpis.discoveryToAffiliateClickRate?.target)}
-        </p>
-        <p className="text-slate-600 dark:text-slate-300">
-          Email Capture: {formatPercent(kpis.emailCaptureRate?.current)} / target {formatPercent(kpis.emailCaptureRate?.target)}
-        </p>
-      </div>
-    </DataCard>
-  );
-}
-
-function FunnelCard({ funnel }) {
-  const stages = funnel?.stages || {};
-  const rates = funnel?.rates || {};
-  return (
-    <DataCard title="Funnel Summary (30d)" rawPayload={funnel}>
-      <StatLine label="Discovery Sessions" value={Number(stages.discoverySessions || 0).toLocaleString()} />
-      <StatLine label="Engaged Sessions" value={Number(stages.engagedSessions || 0).toLocaleString()} />
-      <StatLine label="Shortlist Sessions" value={Number(stages.shortlistSessions || 0).toLocaleString()} />
-      <StatLine label="Affiliate Click Sessions" value={Number(stages.affiliateClickSessions || 0).toLocaleString()} />
-      <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 text-xs dark:border-white/10 dark:bg-white/5">
-        <p className="font-semibold text-slate-800 dark:text-slate-100">Rates</p>
-        <p className="mt-1 text-slate-600 dark:text-slate-300">Discovery → Engaged: {formatPercent(rates.discoveryToEngaged)}</p>
-        <p className="text-slate-600 dark:text-slate-300">Engaged → Shortlist: {formatPercent(rates.engagedToShortlist)}</p>
-        <p className="text-slate-600 dark:text-slate-300">Shortlist → Click: {formatPercent(rates.shortlistToAffiliateClick)}</p>
-      </div>
-    </DataCard>
-  );
-}
-
-function RevenueCard({ revenue }) {
-  return (
-    <DataCard title="Revenue Simulation" rawPayload={revenue}>
-      <StatLine label="Projected Clicks" value={Number(revenue?.totals?.projectedClicks || 0).toLocaleString()} />
-      <StatLine label="Conservative" value={formatMoney(revenue?.totals?.projectedRevenue?.conservative)} />
-      <StatLine label="Base" value={formatMoney(revenue?.totals?.projectedRevenue?.base)} />
-      <StatLine label="Aggressive" value={formatMoney(revenue?.totals?.projectedRevenue?.aggressive)} />
-    </DataCard>
-  );
-}
-
-function ClickSummaryCard({ summary }) {
-  const totals = summary?.totals || {};
-  const placements = summary?.topPlacements || [];
-  return (
-    <DataCard title="Click Summary (30d)" rawPayload={summary}>
-      <StatLine label="Total Clicks" value={Number(totals.total_clicks || 0).toLocaleString()} />
-      <StatLine label="Unique Products" value={Number(totals.unique_products || 0).toLocaleString()} />
-      <StatLine label="Active Regions" value={Number(totals.active_regions || 0).toLocaleString()} />
-      <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 text-xs dark:border-white/10 dark:bg-white/5">
-        <p className="font-semibold text-slate-800 dark:text-slate-100">Top Placements</p>
-        <ul className="mt-2 space-y-1">
-          {placements.slice(0, 5).map((item) => (
-            <li key={`${item.placement}-${item.clicks}`} className="flex items-center justify-between text-slate-600 dark:text-slate-300">
-              <span>{item.placement || "unknown"}</span>
-              <span>{Number(item.clicks || 0).toLocaleString()}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </DataCard>
-  );
-}
-
-function ActivityCard({ title, items }) {
-  return (
-    <DataCard title={title} rawPayload={items}>
-      {!items.length ? (
-        <p className="text-sm text-slate-600 dark:text-slate-300">No records found.</p>
-      ) : (
-        <ul className="space-y-2 text-xs">
-          {items.slice(0, 8).map((item, index) => (
-            <li key={item.id || `${title}-${index}`} className="rounded-lg border border-slate-300/70 bg-white/70 p-2 text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
-              {Object.entries(item)
-                .slice(0, 4)
-                .map(([key, value]) => `${key}: ${String(value)}`)
-                .join(" • ")}
-            </li>
-          ))}
-        </ul>
-      )}
-    </DataCard>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }

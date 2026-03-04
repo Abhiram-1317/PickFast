@@ -150,7 +150,7 @@ export default function CategoryPage() {
               ${Number(product.price || 0).toFixed(2)}
             </p>
             <a
-              href={`${baseUrl}/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=category_buy&pageType=category`}
+              href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=category_buy&pageType=category`}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"

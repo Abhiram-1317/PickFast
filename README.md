@@ -103,6 +103,10 @@ Set credentials in `backend/.env`:
 - `AMAZON_REGION`
 - `AMAZON_MARKETPLACE`
 
+Optional temporary toggle:
+
+- `AMAZON_PAAPI_ENABLED=false` to skip Amazon PA-API sync calls (manual + cron) and log `skipped` instead of failing.
+
 Without valid credentials, sync endpoints fail safely and log errors while the rest of the app remains operational.
 
 ## Implemented Advanced Features (Batch 1)

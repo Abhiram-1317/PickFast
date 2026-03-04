@@ -31,6 +31,14 @@ function mapSearchIndexFromKeyword(keyword) {
   return { searchIndex: "All", category: "general", useCases: ["general"] };
 }
 
+function getDefaultMapping(overrides = {}) {
+  return {
+    searchIndex: overrides.searchIndex || "All",
+    category: overrides.category || "general",
+    useCases: overrides.useCases || ["general"]
+  };
+}
+
 function createDeterministicId(asin) {
   return `amz-${asin.toLowerCase()}`;
 }
@@ -141,6 +149,73 @@ async function fetchSearchItems(keyword, itemCount = 10) {
   return items.map((item) => normalizeAmazonItem(item, defaults)).filter(Boolean);
 }
 
+async function fetchItemByAsin(asin, overrides = {}) {
+  ensureAmazonCredentials();
+
+  const defaults = getDefaultMapping(overrides);
+
+  const body = {
+    PartnerTag: config.amazon.partnerTag,
+    PartnerType: "Associates",
+    Marketplace: config.amazon.marketplace,
+    ItemIds: [asin],
+    Resources: [
+      "Images.Primary.Large",
+      "Images.Primary.Medium",
+      "ItemInfo.Title",
+      "ItemInfo.ByLineInfo",
+      "ItemInfo.ProductInfo",
+      "Offers.Listings.Price",
+      "CustomerReviews.Count",
+      "CustomerReviews.StarRating"
+    ]
+  };
+
+  const request = {
+    host: config.amazon.host,
+    method: "POST",
+    path: "/paapi5/getitems",
+    service: "ProductAdvertisingAPI",
+    region: config.amazon.region,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Amz-Target": "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.GetItems",
+      "Content-Encoding": "amz-1.0"
+    },
+    body: JSON.stringify(body)
+  };
+
+  aws4.sign(request, {
+    accessKeyId: config.amazon.accessKey,
+    secretAccessKey: config.amazon.secretKey
+  });
+
+  const response = await fetch(`https://${config.amazon.host}${request.path}`, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Amazon API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  const items = data?.ItemsResult?.Items || [];
+  const normalized = items.map((item) => normalizeAmazonItem(item, defaults)).filter(Boolean);
+
+  return normalized[0] || null;
+}
+
+async function ingestSingleAsin(asin, overrides = {}) {
+  const product = await fetchItemByAsin(asin, overrides);
+  if (!product) {
+    return null;
+  }
+  return product;
+}
+
 async function ingestFromAmazonKeywords(keywords) {
   const imported = [];
   const seen = new Map();
@@ -182,5 +257,7 @@ async function ingestFromAmazonKeywords(keywords) {
 }
 
 module.exports = {
-  ingestFromAmazonKeywords
+  ingestFromAmazonKeywords,
+  fetchItemByAsin,
+  ingestSingleAsin
 };
