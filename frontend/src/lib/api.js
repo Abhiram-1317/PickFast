@@ -1,7 +1,14 @@
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 
 export function getApiBaseUrl() {
-  return apiBaseUrl;
+  if (apiBaseUrl) {
+    return apiBaseUrl;
+  }
+  // If running in the browser, imply the backend is on port 4000 of the same host
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:4000`;
+  }
+  return "http://localhost:4000";
 }
 
 export async function fetchJson(path, options = {}) {
