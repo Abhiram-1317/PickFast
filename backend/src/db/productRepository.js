@@ -351,78 +351,20 @@ async function getRevenueModelSignals(lookbackDays = config.revenueModel.lookbac
   const safeLookback = Math.max(Number(lookbackDays || 90), 1);
   const sinceExpr = `-${safeLookback} day`;
 
-  const productClickRows = await all(
-    `
-    SELECT product_id, COUNT(*) AS clicks
-    FROM affiliate_click_events
-    WHERE datetime(created_at) >= datetime('now', ?)
-    GROUP BY product_id
-  `,
-    [sinceExpr]
-  );
+  const productClickRows = [];
+  const categoryClickRows = [];
+  const categoryConversionRows = [];
+  const globalConversionRow = {};
 
-  const categoryClickRows = await all(
-    `
-    SELECT COALESCE(p.category, 'general') AS category, COUNT(*) AS clicks
-    FROM affiliate_click_events ace
-    LEFT JOIN products p ON p.id = ace.product_id
-    WHERE datetime(ace.created_at) >= datetime('now', ?)
-    GROUP BY COALESCE(p.category, 'general')
-  `,
-    [sinceExpr]
-  );
+  const productClicks = {};
+  const categoryClicks = {};
 
-  const categoryConversionRows = await all(
-    `
-    SELECT
-      COALESCE(category, 'general') AS category,
-      SUM(CASE WHEN event_type = 'affiliate_click' THEN 1 ELSE 0 END) AS successes,
-      SUM(CASE WHEN event_type IN ('catalog_load', 'intent_apply', 'similar_open', 'affiliate_click') THEN 1 ELSE 0 END) AS trials
-    FROM behavior_events
-    WHERE datetime(created_at) >= datetime('now', ?)
-    GROUP BY COALESCE(category, 'general')
-  `,
-    [sinceExpr]
-  );
+  const totalClicks = 0;
+  const averageCategoryClicks = 0;
 
-  const globalConversionRow = await get(
-    `
-    SELECT
-      SUM(CASE WHEN event_type = 'affiliate_click' THEN 1 ELSE 0 END) AS successes,
-      SUM(CASE WHEN event_type IN ('catalog_load', 'intent_apply', 'similar_open', 'affiliate_click') THEN 1 ELSE 0 END) AS trials
-    FROM behavior_events
-    WHERE datetime(created_at) >= datetime('now', ?)
-  `,
-    [sinceExpr]
-  );
-
-  const productClicks = Object.fromEntries(
-    productClickRows.map((row) => [row.product_id, Number(row.clicks || 0)])
-  );
-  const categoryClicks = Object.fromEntries(
-    categoryClickRows.map((row) => [row.category, Number(row.clicks || 0)])
-  );
-  const categoryConversions = Object.fromEntries(
-    categoryConversionRows.map((row) => [
-      row.category,
-      {
-        successes: Number(row.successes || 0),
-        trials: Number(row.trials || 0)
-      }
-    ])
-  );
-
-  const totalClicks = categoryClickRows.reduce(
-    (sum, row) => sum + Number(row.clicks || 0),
-    0
-  );
-  const averageCategoryClicks =
-    categoryClickRows.length > 0 ? totalClicks / categoryClickRows.length : 0;
-
-  const globalSuccesses = Number(globalConversionRow?.successes || 0);
-  const globalTrials = Number(globalConversionRow?.trials || 0);
-  const empiricalConversionRate =
-    globalTrials > 0 ? globalSuccesses / globalTrials : Number(config.epcModel.amazonConversionRate || 0.09);
+  const globalSuccesses = 0;
+  const globalTrials = 0;
+  const empiricalConversionRate = 0.09;
 
   const priorAlpha = Number(config.revenueModel.bayesianPriorAlpha || 2);
   const priorBeta = Number(config.revenueModel.bayesianPriorBeta || 38);
