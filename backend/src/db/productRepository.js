@@ -14,6 +14,17 @@ function mapRowToProduct(row) {
     return null;
   }
 
+  // Helper to safely parse JSONB columns which might already be objects
+  const safeParse = (val, fallback) => {
+    if (!val) return fallback;
+    if (typeof val === 'object') return val; // Already parsed by pg driver
+    try {
+      return JSON.parse(val);
+    } catch {
+      return fallback;
+    }
+  };
+
   return {
     id: row.id,
     slug: row.slug,
@@ -30,8 +41,8 @@ function mapRowToProduct(row) {
     monthlySalesEstimate: row.monthly_sales_estimate,
     stockStatus: row.stock_status,
     trendScore: row.trend_score,
-    specs: row.specs_json ? JSON.parse(row.specs_json) : {},
-    useCases: row.use_cases_json ? JSON.parse(row.use_cases_json) : [],
+    specs: safeParse(row.specs_json, {}),
+    useCases: safeParse(row.use_cases_json, []),
     amazonUrl: row.amazon_url,
     image: row.image,
     source: row.source,
