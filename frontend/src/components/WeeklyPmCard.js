@@ -1,135 +1,82 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getApiBaseUrl } from "../lib/api";
-
-function formatPercent(value) {
-  return `${(Number(value || 0) * 100).toFixed(1)}%`;
-}
+import { useState, useEffect } from "react";
 
 export default function WeeklyPmCard() {
   const [report, setReport] = useState(null);
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [windowDays, setWindowDays] = useState(7);
 
   useEffect(() => {
-    let active = true;
+    const base =
+      typeof window !== "undefined"
+        ? `${window.location.protocol}//${window.location.hostname}:4000`
+        : "http://localhost:4000";
 
-    async function loadReport() {
-      try {
-        const response = await fetch(
-          `${getApiBaseUrl()}/api/admin/weekly-pm-report?windowDays=${windowDays}&experimentKey=hero_cta_v1`
-        );
+    fetch(`${base}/api/admin/weekly-pm-report`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setReport(data))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "Unable to load weekly PM report");
-        }
-
-        if (active) {
-          setReport(payload);
-        }
-      } catch (requestError) {
-        if (active) {
-          setError(requestError.message);
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadReport();
-    return () => {
-      active = false;
-    };
-  }, [windowDays]);
-
-  return (
-    <section className="glass rounded-2xl p-5 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Weekly PM Dashboard</h2>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full border border-slate-300/80 bg-white/70 px-2.5 py-1 text-xs text-slate-600 dark:border-white/15 dark:bg-white/5 dark:text-slate-300">
-            Monday Review
-          </span>
-          <select
-            value={windowDays}
-            onChange={(event) => {
-              setError("");
-              setLoading(true);
-              setWindowDays(Number(event.target.value));
-            }}
-            className="rounded-lg border border-slate-300/80 bg-white/80 px-2 py-1 text-xs text-slate-700 dark:border-white/15 dark:bg-slate-900/70 dark:text-slate-200"
-          >
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-          </select>
+  if (loading) {
+    return (
+      <div className="card animate-pulse rounded-2xl p-5">
+        <div className="h-4 w-32 rounded bg-slate-200" />
+        <div className="mt-4 space-y-2">
+          <div className="h-3 w-full rounded bg-slate-100" />
+          <div className="h-3 w-3/4 rounded bg-slate-100" />
         </div>
       </div>
+    );
+  }
 
-      {loading ? (
-        <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">Loading weekly KPI report...</p>
-      ) : null}
+  if (!report) return null;
 
-      {error ? (
-        <p className="mt-3 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-          {error.includes("Unauthorized")
-            ? "Admin key required for weekly PM report endpoint."
-            : error}
-        </p>
-      ) : null}
+  const kpis = report.kpis || report.summary || {};
+  const highlights = report.highlights || report.topActions || [];
 
-      {!loading && !error && report ? (
-        <>
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Discovery Sessions</p>
-              <p className="text-lg font-bold text-slate-900 dark:text-white">
-                {report.kpis?.discoverySessions?.current || 0}
+  return (
+    <div className="card rounded-2xl p-5">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">📊</span>
+        <h3 className="text-sm font-bold text-slate-800">Weekly PM Report</h3>
+      </div>
+
+      {/* KPI grid */}
+      {Object.keys(kpis).length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {Object.entries(kpis).slice(0, 6).map(([key, value]) => (
+            <div key={key} className="rounded-lg bg-slate-50 p-3 text-center">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                {key.replace(/([A-Z])/g, " $1").trim()}
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Target {report.kpis?.discoverySessions?.target || 0}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Discovery → Click</p>
-              <p className="text-lg font-bold text-slate-900 dark:text-white">
-                {formatPercent(report.kpis?.discoveryToAffiliateClickRate?.current)}
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Target {formatPercent(report.kpis?.discoveryToAffiliateClickRate?.target)}
+              <p className="mt-0.5 text-base font-bold text-slate-900">
+                {typeof value === "number" ? value.toLocaleString() : String(value)}
               </p>
             </div>
+          ))}
+        </div>
+      )}
 
-            <div className="rounded-lg border border-slate-300/70 bg-white/70 p-3 dark:border-white/10 dark:bg-white/5">
-              <p className="text-xs text-slate-600 dark:text-slate-300">Email Capture</p>
-              <p className="text-lg font-bold text-slate-900 dark:text-white">
-                {formatPercent(report.kpis?.emailCaptureRate?.current)}
-              </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Target {formatPercent(report.kpis?.emailCaptureRate?.target)}
-              </p>
-            </div>
-          </div>
+      {/* Highlights */}
+      {Array.isArray(highlights) && highlights.length > 0 && (
+        <ul className="mt-4 space-y-1">
+          {highlights.slice(0, 5).map((h, i) => (
+            <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
+              <span className="mt-0.5 text-emerald-500">•</span>
+              <span>{typeof h === "string" ? h : h.text || h.message || JSON.stringify(h)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
 
-          <div className="mt-3 rounded-lg border border-cyan-400/35 bg-cyan-500/10 p-3 text-xs text-cyan-800 dark:text-cyan-100">
-            <p className="font-semibold">
-              Rollout Action: {report.rolloutRule?.recommendedAction || "continue_learning"}
-            </p>
-            <p className="mt-1">
-              Candidate: {report.rolloutRule?.candidateVariantKey || "n/a"} • Lift {formatPercent(report.rolloutRule?.observed?.liftVsControl || 0)}
-            </p>
-            <p className="mt-1">
-              p-value {Number(report.rolloutRule?.observed?.pValueOneTailed || 1).toFixed(3)} • Bayesian {formatPercent(report.rolloutRule?.observed?.bayesianBeatProbability || 0)}
-            </p>
-          </div>
-        </>
-      ) : null}
-    </section>
+      {/* Fallback: raw JSON preview */}
+      {Object.keys(kpis).length === 0 && (!Array.isArray(highlights) || highlights.length === 0) && (
+        <pre className="mt-4 max-h-40 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+          {JSON.stringify(report, null, 2)}
+        </pre>
+      )}
+    </div>
   );
 }

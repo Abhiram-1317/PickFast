@@ -176,6 +176,21 @@ async function updateAdminProduct(id, payload) {
 }
 
 async function deleteAdminProduct(id) {
+  // First clean up related tables that have foreign keys
+  await run("DELETE FROM price_change_logs WHERE product_id = $1", [id]);
+  await run("DELETE FROM price_tracking WHERE product_id = $1", [id]);
+  await run("DELETE FROM price_alerts WHERE product_id = $1", [id]);
+  // Note: duplicate_events and click events usually are kept for analytics,
+  // but if foreign keys block it, we must delete or update them to NULL.
+  // The error log showed a constraint error on price_tracking.
+  
+  // Try to delete click events if they block
+  try {
+    await run("DELETE FROM affiliate_click_events WHERE product_id = $1", [id]);
+  } catch (e) {
+    // Ignore if table doesn't exist or other error, proceed to product delete
+  }
+
   const row = await get("DELETE FROM products WHERE id = $1 AND source = 'manual' RETURNING *", [id]);
   return { deleted: Boolean(row) };
 }

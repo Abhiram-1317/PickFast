@@ -46,36 +46,26 @@ const {
   getDbOverview,
   getFunnelSummary,
   evaluateAbandonedShortlistReminders,
-  getShortlistReminderNotifications,
-  upsertProducts
+  getShortlistReminderNotifications
 } = require("./db/productRepository");
 const {
   refreshCatalogScores,
   runAmazonSync,
-  startSyncScheduler,
-  bootstrapSeedDataIfEmpty
+  startSyncScheduler
 } = require("./jobs/syncJobs");
-const {
-  listAdminProducts,
-  createAdminProduct,
-  updateAdminProduct,
-  deleteAdminProduct
-} = require("./db/adminProducts");
-const { getCommissionRules, applyCommissionRules } = require("./services/commissionRules");
+const { getCommissionRules } = require("./services/commissionRules");
 const {
   withRegionAffiliateUrl,
   inferRegionFromRequest,
   normalizeRegion,
   buildAffiliateLink
 } = require("./services/affiliateLinks");
-const { ingestSingleAsin } = require("./services/amazonPaapi");
 const { buildIntentPages, getIntentBySlug } = require("./services/seoIntent");
 const {
   buildProfileFromEvents,
   getPersonalizedRecommendations
 } = require("./services/personalization");
 const { compareProducts, getSimilarProducts } = require("./services/recommendation");
-const { withScores } = require("./services/scoring");
 
 const app = express();
 const port = config.port;
@@ -151,22 +141,6 @@ function ensureAdmin(req, res, next) {
   next();
 }
 
-function ensureAdminApiKey(req, res, next) {
-  const providedApiKey = req.header("x-admin-key") || "";
-  const bearer = (req.header("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  const candidate = providedApiKey || bearer;
-
-  if (!config.adminApiKey) {
-    return res.status(503).json({ error: "ADMIN_API_KEY not configured" });
-  }
-
-  if (candidate !== config.adminApiKey) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  next();
-}
-
 function mapSortBy(sortBy) {
   const sortMap = {
     reviewCount: "review_count",
@@ -185,20 +159,6 @@ function toSlug(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
-
-app.post("/api/admin/login", (req, res) => {
-  const { username, password } = req.body;
-  
-  // Use constant-time comparison in production ideally, but simple check is okay here
-  if (
-    username === config.adminUsername &&
-    password === config.adminPassword
-  ) {
-    return res.json({ success: true, apiKey: config.adminApiKey });
-  }
-  
-  return res.status(401).json({ error: "Invalid username or password" });
-});
 
 app.get("/api/health", (req, res) => {
   res.json({
@@ -506,7 +466,7 @@ app.post("/api/track/click", async (req, res) => {
   res.json({ ok: true });
 });
 
-async function handleBuyRedirect(req, res) {
+app.get("/buy/:slug", async (req, res) => {
   const { slug } = req.params;
   const region = normalizeRegion(req.query.region || inferRegionFromRequest(req));
   const pageType = req.query.pageType || "redirect";
@@ -543,10 +503,7 @@ async function handleBuyRedirect(req, res) {
   });
 
   res.redirect(302, affiliateUrl);
-}
-
-app.get("/buy/:slug", handleBuyRedirect);
-app.get("/api/buy/:slug", handleBuyRedirect);
+});
 
 app.post("/api/behavior/track", async (req, res) => {
   const { sessionId, eventType, productId, category, price, region, metadata } = req.body || {};
@@ -693,54 +650,6 @@ app.post("/api/newsletter/signup", async (req, res) => {
   });
 
   res.status(201).json({ signup });
-});
-
-app.get("/api/admin/products", ensureAdminApiKey, async (_req, res) => {
-  const products = await listAdminProducts();
-  res.json({ products });
-});
-
-app.post("/api/admin/products", ensureAdminApiKey, async (req, res) => {
-  const result = await createAdminProduct(req.body || {});
-
-  if (result.error) {
-    return res.status(400).json({ error: result.error });
-  }
-
-  res.status(201).json({ product: result.product });
-});
-
-app.put("/api/admin/products/:id", ensureAdminApiKey, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) {
-    return res.status(400).json({ error: "Invalid id" });
-  }
-
-  const result = await updateAdminProduct(id, req.body || {});
-
-  if (result.notFound) {
-    return res.status(404).json({ error: "Product not found" });
-  }
-
-  if (result.error) {
-    return res.status(400).json({ error: result.error });
-  }
-
-  res.json({ product: result.product });
-});
-
-app.delete("/api/admin/products/:id", ensureAdminApiKey, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) {
-    return res.status(400).json({ error: "Invalid id" });
-  }
-
-  const result = await deleteAdminProduct(id);
-  if (!result.deleted) {
-    return res.status(404).json({ error: "Product not found" });
-  }
-
-  res.json({ ok: true });
 });
 
 app.post("/api/admin/auth/login", (req, res) => {
@@ -923,43 +832,6 @@ app.get("/api/admin/newsletter/signups", ensureAdmin, async (req, res) => {
   res.json({ signups });
 });
 
-app.post("/api/admin/products/import-asin", ensureAdmin, async (req, res) => {
-  const { asin, category, useCases } = req.body || {};
-
-  if (!asin) {
-    return res.status(400).json({ error: "asin is required" });
-  }
-
-  if (!config.amazon.paapiEnabled) {
-    return res.status(503).json({ error: "PA-API is disabled" });
-  }
-
-  try {
-    const normalizedUseCases = Array.isArray(useCases)
-      ? useCases.filter(Boolean)
-      : useCases
-        ? [useCases]
-        : undefined;
-
-    const product = await ingestSingleAsin(asin, {
-      category: category || undefined,
-      useCases: normalizedUseCases
-    });
-
-    if (!product) {
-      return res.status(404).json({ error: "Product not found from Amazon" });
-    }
-
-    const revenueSignals = await getRevenueModelSignals(config.revenueModel.lookbackDays);
-    const scored = withScores(applyCommissionRules([product]), { revenueSignals });
-    await upsertProducts(scored, "admin");
-
-    res.json({ ok: true, imported: scored[0] });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.get("/api/admin/alerts/notifications", ensureAdmin, async (req, res) => {
   const notifications = await getAlertNotifications(req.query.limit || 100);
   res.json({ notifications });
@@ -988,7 +860,6 @@ app.use((req, res) => {
 
 async function bootstrap() {
   await initDb();
-  await bootstrapSeedDataIfEmpty();
   await refreshCatalogScores();
   startSyncScheduler();
 

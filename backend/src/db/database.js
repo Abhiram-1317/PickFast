@@ -1,35 +1,114 @@
 const { Pool } = require("pg");
+const sqlite3 = require("sqlite3");
 
 const connectionString = process.env.DATABASE_URL;
 
-if (!connectionString) {
-  throw new Error("DATABASE_URL is required for Postgres connection");
-}
+let isSQLite = false;
+let db = null;
+let pool = null;
 
-const pool = new Pool({
-  connectionString,
-  ssl: /(localhost|127\.0\.0\.1)/.test(connectionString)
+if (!connectionString) {
+  console.log("No DATABASE_URL found. Using SQLite fallback.");
+  isSQLite = true;
+  db = new sqlite3.Database("./pickfast.db", (err) => {
+    if (err) {
+      console.error("Failed to open SQLite database:", err.message);
+    } else {
+      console.log("Connected to SQLite database: ./pickfast.db");
+    }
+  });
+} else {
+  pool = new Pool({
+    connectionString,
+    ssl: /(localhost|127\.0\.0\.1)/.test(connectionString)
       ? false
       : { rejectUnauthorized: false }
-});
+  });
+}
+
+function transformSqlForSqlite(sql) {
+    if (sql.includes("ALTER TABLE products ALTER COLUMN")) return null; // Skip incompatible ALTERS
+    
+    // SQLite Conversions - Date Arithmetic (Must act on NOW() before it is replaced)
+    sql = sql.replace(/NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*days?'/gi, "datetime('now', '-$1 days')");
+    sql = sql.replace(/NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*minutes?'/gi, "datetime('now', '-$1 minutes')");
+    sql = sql.replace(/NOW\(\)\s*-\s*INTERVAL\s*'(\d+)\s*hours?'/gi, "datetime('now', '-$1 hours')");
+
+    // Generic Conversions
+    sql = sql.replace(/::[a-zA-Z0-9_]+/gi, ""); // Remove PG casts
+    sql = sql.replace(/SERIAL PRIMARY KEY/gi, "INTEGER PRIMARY KEY AUTOINCREMENT");
+    sql = sql.replace(/JSONB/gi, "TEXT");
+    sql = sql.replace(/TIMESTAMPTZ/gi, "DATETIME");
+    sql = sql.replace(/NOW\(\)/gi, "CURRENT_TIMESTAMP");
+    sql = sql.replace(/NUMERIC/gi, "REAL");
+    sql = sql.replace(/VARCHAR\(\d+\)/gi, "TEXT");
+    // sql = sql.replace(/IF NOT EXISTS/gi, "");
+
+    return sql;
+}
+
+// Helper to convert SQLite style ? placeholders to Postgres $1, $2...
+function normalizeSql(sql) {
+  let i = 0;
+  return isSQLite ? sql : sql.replace(/\?/g, () => `$${++i}`);
+}
 
 async function run(sql, params = []) {
-  const result = await pool.query(sql, params);
-  return { rowCount: result.rowCount, rows: result.rows };
+  if (isSQLite) {
+    const transformedSql = transformSqlForSqlite(sql);
+    if (!transformedSql) return { rowCount: 0, rows: [] };
+
+    return new Promise((resolve, reject) => {
+      db.run(transformedSql, params, function (err) {
+        if (err) {
+           if (err.message.includes("duplicate column")) return resolve({ rowCount: 0, rows: [] });
+           console.error("SQLite Run Error:", err.message, transformedSql);
+           return reject(err);
+        }
+        resolve({ rowCount: this.changes, rows: [] });
+      });
+    });
+  }
+
+  const normSql = normalizeSql(sql);
+  try {
+    const result = await pool.query(normSql, params);
+    return { rowCount: result.rowCount, rows: result.rows };
+  } catch (error) {
+    console.warn("Database query failed (retryable):", error.message);
+    throw error;
+  }
 }
 
 async function get(sql, params = []) {
-  const result = await pool.query(sql, params);
+  if (isSQLite) {
+     const transformedSql = transformSqlForSqlite(sql);
+     return new Promise((resolve, reject) => {
+        db.get(transformedSql, params, (err, row) => {
+           if (err) return reject(err);
+           resolve(row);
+        });
+     });
+  }
+  const result = await pool.query(normalizeSql(sql), params);
   return result.rows[0] || null;
 }
 
 async function all(sql, params = []) {
-  const result = await pool.query(sql, params);
+  if (isSQLite) {
+     const transformedSql = transformSqlForSqlite(sql);
+     return new Promise((resolve, reject) => {
+        db.all(transformedSql, params, (err, rows) => {
+           if (err) return reject(err);
+           resolve(rows);
+        });
+     });
+  }
+  const result = await pool.query(normalizeSql(sql), params);
   return result.rows;
 }
 
 async function initDb() {
-  // Core tables
   await run(`
     CREATE TABLE IF NOT EXISTS products (
       id TEXT PRIMARY KEY,
@@ -63,19 +142,33 @@ async function initDb() {
     )
   `);
 
-  await run(`ALTER TABLE products ALTER COLUMN source TYPE VARCHAR(20)`);
-  await run(`ALTER TABLE products ALTER COLUMN source SET DEFAULT 'manual'`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS slug TEXT`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS asin TEXT`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS specs_json JSONB DEFAULT '{}'`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS use_cases_json JSONB DEFAULT '[]'`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_status TEXT DEFAULT 'in_stock'`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS trend_score NUMERIC DEFAULT 50`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 0`);
-  await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS monthly_sales_estimate INTEGER DEFAULT 0`);
+  if (isSQLite) {
+      try { await run(`ALTER TABLE products ADD COLUMN slug TEXT`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN description TEXT`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN asin TEXT`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN brand TEXT`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN specs_json TEXT DEFAULT '{}'`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN use_cases_json TEXT DEFAULT '[]'`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN stock_status TEXT DEFAULT 'in_stock'`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN trend_score REAL DEFAULT 50`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN review_count INTEGER DEFAULT 0`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN commission_rate REAL DEFAULT 0`); } catch(e){}
+      try { await run(`ALTER TABLE products ADD COLUMN monthly_sales_estimate INTEGER DEFAULT 0`); } catch(e){}
+  } else {
+      await run(`ALTER TABLE products ALTER COLUMN source TYPE VARCHAR(20)`);
+      await run(`ALTER TABLE products ALTER COLUMN source SET DEFAULT 'manual'`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS slug TEXT`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS asin TEXT`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS specs_json JSONB DEFAULT '{}'`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS use_cases_json JSONB DEFAULT '[]'`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_status TEXT DEFAULT 'in_stock'`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS trend_score NUMERIC DEFAULT 50`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS review_count INTEGER DEFAULT 0`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS commission_rate NUMERIC DEFAULT 0`);
+      await run(`ALTER TABLE products ADD COLUMN IF NOT EXISTS monthly_sales_estimate INTEGER DEFAULT 0`);
+  }
 
   await run(`
     CREATE TABLE IF NOT EXISTS sync_logs (
@@ -135,266 +228,35 @@ async function initDb() {
       device_type TEXT,
       source_url TEXT,
       referrer TEXT,
-      affiliate_url TEXT,
-      user_agent TEXT,
-      ip_hash TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      FOREIGN KEY(product_id) REFERENCES products(id)
+      session_id TEXT,
+      experiment_key TEXT,
+      variant TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  await run(`
-    CREATE TABLE IF NOT EXISTS shortlists (
-      id SERIAL PRIMARY KEY,
-      slug TEXT UNIQUE NOT NULL,
-      name TEXT,
-      product_ids_json JSONB NOT NULL,
-      contact_email TEXT,
-      region TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS price_alerts (
-      id SERIAL PRIMARY KEY,
-      email TEXT NOT NULL,
-      product_id TEXT NOT NULL,
-      target_price NUMERIC NOT NULL,
-      region TEXT,
-      status TEXT DEFAULT 'active',
-      last_triggered_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      FOREIGN KEY(product_id) REFERENCES products(id)
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS newsletter_signups (
-      id SERIAL PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      source TEXT,
-      status TEXT DEFAULT 'active',
-      metadata_json JSONB,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS alert_notifications (
-      id SERIAL PRIMARY KEY,
-      alert_id INTEGER NOT NULL,
-      product_id TEXT NOT NULL,
-      email TEXT NOT NULL,
-      target_price NUMERIC NOT NULL,
-      current_price NUMERIC NOT NULL,
-      message TEXT,
-      status TEXT DEFAULT 'pending',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      FOREIGN KEY(alert_id) REFERENCES price_alerts(id),
-      FOREIGN KEY(product_id) REFERENCES products(id)
-    )
-  `);
-
-  await run(`
+   await run(`
     CREATE TABLE IF NOT EXISTS behavior_events (
       id SERIAL PRIMARY KEY,
-      session_id TEXT NOT NULL,
       event_type TEXT NOT NULL,
-      product_id TEXT,
-      category TEXT,
-      price NUMERIC,
-      region TEXT,
-      metadata_json JSONB,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      FOREIGN KEY(product_id) REFERENCES products(id)
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS user_profiles (
-      session_id TEXT PRIMARY KEY,
-      top_categories_json JSONB,
-      preferred_price NUMERIC,
-      preferred_region TEXT,
-      confidence_score NUMERIC DEFAULT 0,
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS shortlist_reminder_notifications (
-      id SERIAL PRIMARY KEY,
-      shortlist_slug TEXT NOT NULL,
-      contact_email TEXT NOT NULL,
-      message TEXT,
-      status TEXT DEFAULT 'pending',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS ab_experiments (
-      id SERIAL PRIMARY KEY,
-      experiment_key TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      status TEXT DEFAULT 'active',
-      lifecycle_state TEXT DEFAULT 'running',
-      allocation_json JSONB,
-      winner_variant_key TEXT,
-      min_sample_size INTEGER DEFAULT 50,
-      min_runtime_days INTEGER DEFAULT 3,
-      max_runtime_days INTEGER DEFAULT 30,
-      min_learning_evaluations INTEGER DEFAULT 3,
-      evaluations_count INTEGER DEFAULT 0,
-      min_lift_threshold NUMERIC DEFAULT 0.1,
-      auto_rollout_enabled BOOLEAN DEFAULT TRUE,
-      auto_pause_enabled BOOLEAN DEFAULT TRUE,
-      auto_archive_enabled BOOLEAN DEFAULT TRUE,
-      auto_archive_after_days INTEGER DEFAULT 14,
-      paused_reason TEXT,
-      started_at TIMESTAMPTZ DEFAULT NOW(),
-      ended_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS ab_variants (
-      id SERIAL PRIMARY KEY,
-      experiment_id INTEGER NOT NULL,
-      variant_key TEXT NOT NULL,
-      name TEXT NOT NULL,
-      weight NUMERIC DEFAULT 50,
-      config_json JSONB,
-      is_control BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(experiment_id, variant_key),
-      FOREIGN KEY(experiment_id) REFERENCES ab_experiments(id)
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS ab_assignments (
-      id SERIAL PRIMARY KEY,
-      experiment_key TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      variant_key TEXT NOT NULL,
-      assigned_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(experiment_key, session_id)
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS ab_events (
-      id SERIAL PRIMARY KEY,
-      experiment_key TEXT NOT NULL,
-      variant_key TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
+      page_path TEXT,
+      element_id TEXT,
+      device_type TEXT,
+      session_id TEXT,
       metadata_json JSONB,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-
+  
   await run(`
-    CREATE TABLE IF NOT EXISTS ab_rollout_actions (
-      id SERIAL PRIMARY KEY,
-      experiment_key TEXT NOT NULL,
-      action_type TEXT NOT NULL,
-      reason TEXT,
-      details_json JSONB,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
+     CREATE TABLE IF NOT EXISTS shortlists (
+        id SERIAL PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        products_json JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+     )
   `);
-
-  // Seed hero experiment if missing
-  await run(
-    `INSERT INTO ab_experiments (
-      experiment_key, name, status, allocation_json,
-      min_sample_size, min_runtime_days, min_lift_threshold,
-      auto_rollout_enabled, auto_pause_enabled,
-      lifecycle_state, max_runtime_days, min_learning_evaluations,
-      auto_archive_enabled, auto_archive_after_days,
-      started_at, updated_at
-    )
-    VALUES ($1, $2, 'active', $3, 50, 3, 0.1, TRUE, TRUE, 'running', 30, 3, TRUE, 14, NOW(), NOW())
-    ON CONFLICT (experiment_key) DO NOTHING`,
-    [
-      "hero_cta_v1",
-      "Hero CTA Copy Test",
-      JSON.stringify({ goal: "affiliate_click", strategy: "weighted_random" })
-    ]
-  );
-
-  const hero = await get(
-    "SELECT id FROM ab_experiments WHERE experiment_key = $1",
-    ["hero_cta_v1"]
-  );
-
-  if (hero) {
-    await run(
-      `INSERT INTO ab_variants (experiment_id, variant_key, name, weight, config_json, is_control)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (experiment_id, variant_key) DO NOTHING`,
-      [
-        hero.id,
-        "control",
-        "Control CTA",
-        50,
-        JSON.stringify({ ctaText: "Load Products" }),
-        true
-      ]
-    );
-
-    await run(
-      `INSERT INTO ab_variants (experiment_id, variant_key, name, weight, config_json, is_control)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (experiment_id, variant_key) DO NOTHING`,
-      [
-        hero.id,
-        "value_focus",
-        "Value Focus CTA",
-        50,
-        JSON.stringify({ ctaText: "Find Best Value Picks" }),
-        false
-      ]
-    );
-  }
-
-  // Indexes
-  await run("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
-  await run("CREATE INDEX IF NOT EXISTS idx_products_score ON products(score DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_change_product_id ON price_change_logs(product_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_change_changed_at ON price_change_logs(changed_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_product_id ON price_tracking(product_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_hot_deal ON price_tracking(is_hot_deal)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_tracking_updated_at ON price_tracking(updated_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_duplicate_product_id ON duplicate_events(product_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_click_events_product_id ON affiliate_click_events(product_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_click_events_created_at ON affiliate_click_events(created_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_shortlists_slug ON shortlists(slug)");
-  await run("CREATE INDEX IF NOT EXISTS idx_shortlists_contact_email ON shortlists(contact_email)");
-  await run("CREATE INDEX IF NOT EXISTS idx_newsletter_signups_email ON newsletter_signups(email)");
-  await run("CREATE INDEX IF NOT EXISTS idx_newsletter_signups_status ON newsletter_signups(status)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_alerts_email ON price_alerts(email)");
-  await run("CREATE INDEX IF NOT EXISTS idx_price_alerts_product_id ON price_alerts(product_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_alert_notifications_alert_id ON alert_notifications(alert_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_behavior_events_session ON behavior_events(session_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_behavior_events_created_at ON behavior_events(created_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_shortlist_reminders_slug ON shortlist_reminder_notifications(shortlist_slug)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_experiments_key ON ab_experiments(experiment_key)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_variants_experiment ON ab_variants(experiment_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_assignments_lookup ON ab_assignments(experiment_key, session_id)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_events_experiment_time ON ab_events(experiment_key, created_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_events_session ON ab_events(session_id, created_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_experiments_status ON ab_experiments(status)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_rollout_actions_key ON ab_rollout_actions(experiment_key, created_at DESC)");
-  await run("CREATE INDEX IF NOT EXISTS idx_ab_experiments_lifecycle ON ab_experiments(lifecycle_state)");
 }
 
 module.exports = {

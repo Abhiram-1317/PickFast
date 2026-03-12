@@ -1,152 +1,179 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fetchJson, getApiBaseUrl, toSlug } from "../../lib/api";
+import Link from "next/link";
+import api from "../../lib/api";
+import ProductCard from "../../components/ProductCard";
+import { CardSkeleton } from "../../components/Skeletons";
+import { EmptyState, ErrorState } from "../../components/StatusStates";
 
 export default function RecommendationsPage() {
   const [recommendations, setRecommendations] = useState([]);
   const [hotDeals, setHotDeals] = useState([]);
-  const [region, setRegion] = useState("US");
+  const [categories, setCategories] = useState([]);
+  const [category, setCategory] = useState("");
+  const [budgetInput, setBudgetInput] = useState("");
+  const [region, setRegion] = useState("IN");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const baseUrl = getApiBaseUrl();
+  useEffect(() => {
+    api
+      .fetchCategories()
+      .then((d) => setCategories(d.categories || []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let active = true;
 
+    const params = { limit: 12, region };
+    if (category) params.category = category;
+    if (budgetInput) params.budget = budgetInput;
+
     Promise.all([
-      fetchJson(`/api/recommendations?limit=12&region=${region}`),
-      fetchJson(`/api/products/hot-deals?limit=6&region=${region}`)
+      api.fetchRecommendations(params),
+      api.fetchHotDeals(6),
     ])
-      .then(([recPayload, dealsPayload]) => {
+      .then(([recData, dealsData]) => {
         if (active) {
-          setRecommendations(recPayload.recommendations || []);
-          setHotDeals(dealsPayload.deals || []);
+          setRecommendations(recData.recommendations || []);
+          setHotDeals(dealsData.deals || []);
+          setError("");
         }
       })
-      .catch((requestError) => {
-        if (active) {
-          setError(requestError.message);
-        }
+      .catch((err) => {
+        if (active) setError(err.message);
       })
       .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       });
 
-    return () => {
-      active = false;
-    };
-  }, [region]);
+    return () => { active = false; };
+  }, [category, budgetInput, region]);
+
+  const inputClass =
+    "rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400";
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Recommendation Sections</h1>
+    <main className="fade-in mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-bold text-slate-900">Recommendations</h1>
+        <p className="text-sm text-slate-500">
+          Personalized product picks and hot deals curated for you.
+        </p>
+      </div>
+
+      <div className="mt-6 card rounded-2xl p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">All Categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <input
+            type="number"
+            value={budgetInput}
+            onChange={(e) => setBudgetInput(e.target.value)}
+            placeholder="Max budget"
+            className={`w-32 ${inputClass}`}
+            min="0"
+          />
           <select
             value={region}
-            onChange={(event) => {
-              setError("");
-              setLoading(true);
-              setRegion(event.target.value);
-            }}
-            className="rounded-xl border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-white/15 dark:bg-slate-900/70 dark:text-slate-100"
+            onChange={(e) => setRegion(e.target.value)}
+            className={inputClass}
           >
-            <option value="US">US</option>
-            <option value="UK">UK</option>
-            <option value="IN">IN</option>
-            <option value="CA">CA</option>
+            <option value="IN">🇮🇳 IN</option>
+            <option value="US">🇺🇸 US</option>
+            <option value="UK">🇬🇧 UK</option>
+            <option value="CA">🇨🇦 CA</option>
           </select>
         </div>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Curated recommendations and hot deals powered by your backend APIs.
-        </p>
-      </section>
+      </div>
 
-      {error ? (
-        <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </p>
-      ) : null}
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Hot Deals</h2>
-        {loading ? (
-          <p className="text-sm text-slate-600 dark:text-slate-300">Loading deals and recommendations...</p>
-        ) : null}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {hotDeals.map((product) => (
-            <article key={`deal-${product.id}`} className="glass relative rounded-xl p-4">
-              <img
-                src={product.image || "/file.svg"}
-                alt={product.name}
-                className="h-40 w-full rounded-xl object-cover"
-              />
-              <p className="text-xs font-semibold text-rose-700 dark:text-rose-200">
-                ▼ {Number(product.dropPercent || 0).toFixed(1)}%
-              </p>
-              <h3 className="mt-1 line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
-                {product.name}
-              </h3>
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                Was ${Number(product.lastPrice || 0).toFixed(2)} → Now ${Number(product.currentPrice || 0).toFixed(2)}
-              </p>
-              <a
-                href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_hotdeal_buy&pageType=recommendations`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-              >
-                Claim Deal
-              </a>
-              <Link
-                href={`/product/${encodeURIComponent(product.id)}`}
-                aria-label={`View details for ${product.name}`}
-                className="absolute inset-0 z-10 rounded-xl"
-              />
-            </article>
-          ))}
+      {error && (
+        <div className="mt-6">
+          <ErrorState message={error} onRetry={() => window.location.reload()} />
         </div>
-      </section>
+      )}
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Top Recommendations</h2>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {recommendations.map((product) => (
-            <article key={product.id} className="glass relative rounded-xl p-4">
-              <img
-                src={product.image || "/file.svg"}
-                alt={product.name}
-                className="h-40 w-full rounded-xl object-cover"
-              />
-              <h3 className="line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
-                {product.name}
-              </h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                {product.category} • {(Number(product.commissionRate || 0) * 100).toFixed(1)}% commission
-              </p>
-              <p className="mt-2 text-lg font-bold text-emerald-400">
-                ${Number(product.price || 0).toFixed(2)}
-              </p>
-              <a
-                href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=recommendation_buy&pageType=recommendations`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-              >
-                Buy on Amazon
-              </a>
+      {/* Hot Deals */}
+      {hotDeals.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-lg font-bold text-slate-900">
+            <span className="mr-2">🔥</span>Hot Deals
+          </h2>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {hotDeals.map((deal) => (
               <Link
-                href={`/product/${encodeURIComponent(product.id)}`}
-                aria-label={`View details for ${product.name}`}
-                className="absolute inset-0 z-10 rounded-xl"
+                key={deal.id || deal.productId}
+                href={`/product/${encodeURIComponent(deal.id || deal.productId)}`}
+                className="card group overflow-hidden rounded-xl transition hover:shadow-md"
+              >
+                <div className="aspect-5/3 overflow-hidden bg-slate-100">
+                  <img
+                    src={deal.image || "/file.svg"}
+                    alt={deal.name}
+                    className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="p-4">
+                  <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+                    {deal.name}
+                  </h3>
+                  <div className="mt-2 flex items-center gap-2 text-sm">
+                    {deal.dropPercent && (
+                      <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-600">
+                        ▼ {Number(deal.dropPercent).toFixed(1)}%
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-400 line-through">
+                      ₹{Number(deal.lastPrice || 0).toFixed(2)}
+                    </span>
+                    <span className="font-bold text-emerald-600">
+                      ₹{Number(deal.currentPrice || deal.price || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Recommendations */}
+      <section className="mt-8">
+        <h2 className="text-lg font-bold text-slate-900">Top Recommendations</h2>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {loading ? (
+            <CardSkeleton count={6} />
+          ) : recommendations.length > 0 ? (
+            recommendations.map((product) => (
+              <ProductCard
+                key={product.id}
+                product={product}
+                placement="recommendation"
+                pageType="recommendations"
+                region={region}
+                showScore
               />
-            </article>
-          ))}
+            ))
+          ) : (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <EmptyState
+                icon="💡"
+                title="No recommendations yet"
+                message="Adjust your category or budget filters, or add more products to get personalized picks."
+              />
+            </div>
+          )}
         </div>
       </section>
     </main>

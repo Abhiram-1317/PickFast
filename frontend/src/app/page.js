@@ -1,279 +1,326 @@
 import Link from "next/link";
+import api, { getApiBaseUrl, toSlug, safeFetch } from "../lib/api";
 import HomeEngagementPanel from "../components/HomeEngagementPanel";
-import WeeklyPmCard from "../components/WeeklyPmCard";
-import { getApiBaseUrl, toSlug } from "../lib/api";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "PickFast | Discover, Compare, and Track Deals",
+  title: "PickFast | Smart Product Discovery",
   description:
-    "Server-rendered affiliate discovery homepage with product feed, comparison tools, recommendations, email signup, and price alerts."
+    "Discover, compare, and buy the best products with data-driven recommendations.",
 };
 
 async function getServerData() {
-  const apiBaseUrl = getApiBaseUrl();
+  const [productsData, categoriesData, intentsData, hotDealsData] =
+    await Promise.all([
+      safeFetch(
+        () =>
+          api.fetchProducts({
+            sortBy: "epcScore",
+            order: "desc",
+            limit: 12,
+            region: "IN",
+          }),
+        { products: [] }
+      ),
+      safeFetch(() => api.fetchCategories(), { categories: [] }),
+      safeFetch(() => api.fetchSeoIntents(6), { intents: [] }),
+      safeFetch(() => api.fetchHotDeals(4), { deals: [] }),
+    ]);
 
-  const [productsResponse, categoriesResponse, intentsResponse] = await Promise.allSettled([
-    fetch(`${apiBaseUrl}/api/products?sortBy=epcScore&order=desc&limit=12&region=US`, {
-      cache: "no-store"
-    }),
-    fetch(`${apiBaseUrl}/api/categories`, { cache: "no-store" }),
-    fetch(`${apiBaseUrl}/api/seo/intents?region=US&limit=6`, { cache: "no-store" })
-  ]);
-
-  const products =
-    productsResponse.status === "fulfilled" && productsResponse.value.ok
-      ? (await productsResponse.value.json()).products || []
-      : [];
-  const categories =
-    categoriesResponse.status === "fulfilled" && categoriesResponse.value.ok
-      ? (await categoriesResponse.value.json()).categories || []
-      : [];
-  const intents =
-    intentsResponse.status === "fulfilled" && intentsResponse.value.ok
-      ? (await intentsResponse.value.json()).intents || []
-      : [];
-
-  return { products, categories, intents };
+  return {
+    products: productsData?.products || [],
+    categories: categoriesData?.categories || [],
+    intents: intentsData?.intents || [],
+    hotDeals: hotDealsData?.deals || [],
+  };
 }
 
 export default async function HomePage() {
-  const apiBaseUrl = getApiBaseUrl();
-  const { products, categories, intents } = await getServerData();
+  const baseUrl = getApiBaseUrl();
+  const { products, categories, intents, hotDeals } = await getServerData();
   const spotlight = products[0] || null;
   const topPicks = products.slice(0, 8);
-  const bestSellers = products.slice(0, 12);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 sm:py-6">
-      <section className="glass rounded-2xl px-4 py-2 sm:px-5">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-700 dark:text-slate-200">
-          <span className="font-semibold text-emerald-700 dark:text-emerald-300">Today’s Affiliate Deals</span>
-          <span>{products.length} curated products</span>
-          <span>Fast comparison and shortlist flow</span>
-          <span>Price-drop alerts and newsletter signup</span>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <article className="glass rounded-2xl p-5 sm:p-6 lg:col-span-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700 dark:text-cyan-300">
-            PickFast Storefront
-          </p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white sm:text-5xl">
-            Shop Smart, Compare Fast, Buy Better
+    <main className="fade-in mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      {/* Hero */}
+      <section className="relative overflow-hidden rounded-3xl bg-linear-to-br from-slate-900 via-slate-800 to-emerald-900 px-6 py-16 text-white sm:px-12 sm:py-20">
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTTAgMGg2MHY2MEgweiIgZmlsbD0ibm9uZSIvPjxjaXJjbGUgY3g9IjMwIiBjeT0iMzAiIHI9IjEiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4wNSkiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZykiLz48L3N2Zz4=')] opacity-40" />
+        <div className="relative z-10 max-w-2xl">
+          <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
+            {products.length} curated products
+          </span>
+          <h1 className="mt-4 text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
+            Find the best products,{" "}
+            <span className="text-emerald-400">faster</span>
           </h1>
-          <p className="mt-3 max-w-3xl text-sm text-slate-600 dark:text-slate-300 sm:text-base">
-            Amazon-style discovery flow with ranked picks, quick category jumps, and conversion-optimized deal paths.
+          <p className="mt-4 text-lg text-slate-300">
+            Data-driven product discovery with real-time scoring, price tracking,
+            and side-by-side comparison tools.
           </p>
-          <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="mt-8 flex flex-wrap gap-3">
             <Link
               href="/discover"
-              className="btn-micro rounded-lg bg-cyan-500 px-4 py-2 text-center text-sm font-semibold text-slate-950"
+              className="rounded-lg bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
             >
-              Shop All Deals
+              Browse Products
             </Link>
             <Link
               href="/recommendations"
-              className="btn-micro rounded-lg border border-emerald-400/35 bg-emerald-500/10 px-4 py-2 text-center text-sm font-semibold text-emerald-700 dark:text-emerald-200"
+              className="rounded-lg bg-white/10 px-6 py-2.5 text-sm font-semibold text-white ring-1 ring-white/20 transition hover:bg-white/20"
             >
-              See Recommended For You
-            </Link>
-            <Link
-              href="/compare"
-              className="btn-micro rounded-lg border border-violet-400/35 bg-violet-500/10 px-4 py-2 text-center text-sm font-semibold text-violet-700 dark:text-violet-200"
-            >
-              Compare Top Products
-            </Link>
-            <Link
-              href="/shortlist"
-              className="btn-micro rounded-lg border border-amber-400/35 bg-amber-500/10 px-4 py-2 text-center text-sm font-semibold text-amber-700 dark:text-amber-200"
-            >
-              Build Your Wishlist
+              Get Recommendations
             </Link>
           </div>
-        </article>
+        </div>
+      </section>
 
-        <article className="glass rounded-2xl p-5 sm:p-6 lg:col-span-4">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Spotlight Deal</h2>
-          {spotlight ? (
-            <>
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Top-ranked by EPC and score</p>
-              <img
-                src={spotlight.image || "/file.svg"}
-                alt={spotlight.name}
-                className="mt-3 h-40 w-full rounded-xl object-cover"
-              />
-              <span className="mt-3 inline-flex rounded-full border border-cyan-400/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-700 dark:text-cyan-200">
-                {spotlight.category}
-              </span>
-              <h3 className="mt-2 line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
-                {spotlight.name}
-              </h3>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                Rating {spotlight.rating} • {spotlight.reviewCount} reviews
-              </p>
-              <p className="mt-2 text-2xl font-bold text-emerald-500 dark:text-emerald-400">
-                ${Number(spotlight.price || 0).toFixed(2)}
-              </p>
-              <a
-                href={`${apiBaseUrl}/api/buy/${toSlug(spotlight.name)}?pid=${encodeURIComponent(spotlight.id)}&region=US&placement=home_spotlight_buy&pageType=home`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-micro mt-3 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-              >
-                Buy on Amazon
-              </a>
+      {/* Category shortcuts */}
+      {categories.length > 0 && (
+        <section className="mt-12">
+          <div className="flex items-end justify-between">
+            <h2 className="text-xl font-bold text-slate-900">
+              Shop by Category
+            </h2>
+            <span className="text-sm text-slate-500">
+              {categories.length} categories
+            </span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            {categories.map((category) => (
               <Link
-                href={`/product/${encodeURIComponent(spotlight.id)}`}
-                className="inline-flex text-xs font-semibold text-cyan-700 underline dark:text-cyan-200"
+                key={category}
+                href={`/category/${toSlug(category)}`}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-medium text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700 hover:shadow"
               >
-                View full details
+                {category}
               </Link>
-            </>
-          ) : (
-            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">No spotlight products available yet.</p>
-          )}
-        </article>
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
 
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Shop by Category</h2>
-          <span className="rounded-full border border-slate-300/80 bg-white/70 px-3 py-1 text-xs text-slate-600 dark:border-white/15 dark:bg-white/5 dark:text-slate-300">
-            {categories.length} categories
+      {/* Spotlight + Hot Deals */}
+      <section className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Spotlight */}
+        <div className="card overflow-hidden lg:col-span-2">
+          <div className="p-6">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
+              Spotlight Deal
+            </span>
+            {spotlight ? (
+              <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                <div className="overflow-hidden rounded-xl bg-slate-100">
+                  <img
+                    src={spotlight.image || "/file.svg"}
+                    alt={spotlight.name}
+                    className="h-64 w-full object-cover"
+                  />
+                </div>
+                <div className="flex flex-col justify-center space-y-3">
+                  <span className="inline-block w-fit rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                    {spotlight.category}
+                  </span>
+                  <h3 className="text-xl font-bold text-slate-900">
+                    {spotlight.name}
+                  </h3>
+                  <p className="text-sm text-slate-500">
+                    {Number(spotlight.rating || 0).toFixed(1)} stars &middot;{" "}
+                    {Number(spotlight.reviewCount || 0).toLocaleString()} reviews
+                  </p>
+                  <p className="text-3xl font-bold text-emerald-600">
+                    ₹{Number(spotlight.price || 0).toFixed(2)}
+                  </p>
+                  <div className="flex gap-3">
+                    <a
+                      href={`${baseUrl}/api/buy/${toSlug(spotlight.name)}?pid=${encodeURIComponent(spotlight.id)}&region=IN&placement=home_spotlight_buy&pageType=home`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg bg-emerald-500 px-5 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600"
+                    >
+                      Buy on Amazon
+                    </a>
+                    <Link
+                      href={`/product/${encodeURIComponent(spotlight.id)}`}
+                      className="rounded-lg border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    >
+                      Details
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-sm text-slate-500">
+                No spotlight product available yet.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Hot Deals */}
+        <div className="card p-6">
+          <span className="text-xs font-semibold uppercase tracking-wider text-rose-500">
+            Hot Deals
           </span>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-          {categories.map((category) => (
-            <Link
-              key={`home-cat-${category}`}
-              href={`/category/${toSlug(category)}`}
-              className="btn-micro rounded-xl border border-cyan-400/35 bg-cyan-500/10 px-3 py-2 text-center text-xs font-semibold text-cyan-700 dark:text-cyan-200"
-            >
-              {category}
-            </Link>
-          ))}
+          <div className="mt-4 space-y-4">
+            {hotDeals.length > 0 ? (
+              hotDeals.map((deal) => (
+                <Link
+                  key={deal.id || deal.productId}
+                  href={`/product/${encodeURIComponent(deal.id || deal.productId)}`}
+                  className="block rounded-lg border border-slate-100 p-3 transition hover:border-slate-200 hover:shadow-sm"
+                >
+                  <p className="line-clamp-1 text-sm font-semibold text-slate-900">
+                    {deal.name}
+                  </p>
+                  <div className="mt-1 flex items-center gap-2 text-xs">
+                    {deal.dropPercent && (
+                      <span className="font-semibold text-rose-500">
+                        ▼ {Number(deal.dropPercent).toFixed(1)}% off
+                      </span>
+                    )}
+                    <span className="text-emerald-600 font-semibold">
+                      ₹{Number(deal.currentPrice || deal.price || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <p className="text-sm text-slate-500">
+                No hot deals right now. Check back later!
+              </p>
+            )}
+          </div>
         </div>
       </section>
 
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Today&apos;s Top Picks</h2>
-          <Link href="/discover" className="text-xs font-semibold text-cyan-700 underline dark:text-cyan-200">
-            See all deals
-          </Link>
-        </div>
-        <div className="soft-scroll -mx-1 overflow-x-auto px-1">
-          <div className="flex min-w-max gap-3 pb-1">
+      {/* Top picks */}
+      {topPicks.length > 0 && (
+        <section className="mt-12">
+          <div className="flex items-end justify-between">
+            <h2 className="text-xl font-bold text-slate-900">Top Picks</h2>
+            <Link
+              href="/discover"
+              className="text-sm font-semibold text-emerald-600 hover:text-emerald-700"
+            >
+              View all &rarr;
+            </Link>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {topPicks.map((product) => (
-              <article key={`top-${product.id}`} className="glass relative w-[230px] rounded-xl p-3">
-                <img
-                  src={product.image || "/file.svg"}
-                  alt={product.name}
-                  className="h-28 w-full rounded-lg object-cover"
-                />
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">{product.category}</p>
-                <h3 className="mt-1 line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">
-                  {product.name}
-                </h3>
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                  Rating {product.rating} • {product.reviewCount} reviews
-                </p>
-                <p className="mt-2 text-lg font-bold text-emerald-500 dark:text-emerald-400">
-                  ${Number(product.price || 0).toFixed(2)}
-                </p>
-                <a
-                  href={`${apiBaseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_top_picks_buy&pageType=home`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-                >
-                  Buy
-                </a>
+              <article
+                key={product.id}
+                className="card group relative overflow-hidden rounded-2xl transition-shadow hover:shadow-lg"
+              >
+                <div className="aspect-4/3 overflow-hidden bg-slate-100">
+                  <img
+                    src={product.image || "/file.svg"}
+                    alt={product.name}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="space-y-1.5 p-4">
+                  <span className="text-[11px] font-medium text-slate-500">
+                    {product.category}
+                  </span>
+                  <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
+                    {product.name}
+                  </h3>
+                  <div className="flex items-center gap-1 text-xs text-slate-400">
+                    <span>{Number(product.rating || 0).toFixed(1)} ★</span>
+                    <span>&middot;</span>
+                    <span>
+                      {Number(product.reviewCount || 0).toLocaleString()} reviews
+                    </span>
+                  </div>
+                  <p className="text-lg font-bold text-emerald-600">
+                    ₹{Number(product.price || 0).toFixed(2)}
+                  </p>
+                  <a
+                    href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=IN&placement=home_top_buy&pageType=home`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative z-20 inline-flex w-full items-center justify-center rounded-lg bg-emerald-500 py-2 text-xs font-semibold text-white transition hover:bg-emerald-600"
+                  >
+                    Buy on Amazon
+                  </a>
+                </div>
                 <Link
                   href={`/product/${encodeURIComponent(product.id)}`}
-                  aria-label={`View details for ${product.name}`}
-                  className="absolute inset-0 z-10 rounded-xl"
+                  aria-label={`View ${product.name}`}
+                  className="absolute inset-0 z-10"
                 />
               </article>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <h2 className="text-2xl font-semibold text-slate-900 dark:text-white">Best Sellers in PickFast</h2>
-          <span className="rounded-full border border-slate-300/80 bg-white/70 px-3 py-1 text-xs text-slate-600 dark:border-white/15 dark:bg-white/5 dark:text-slate-300">
-            {bestSellers.length} products
-          </span>
-        </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {bestSellers.map((product) => (
-            <article key={product.id} className="glass card-micro relative overflow-hidden rounded-2xl">
-              <img
-                src={product.image || "/file.svg"}
-                alt={product.name}
-                className="h-44 w-full object-cover"
-              />
-              <div className="space-y-2 p-4">
-                <span className="inline-flex rounded-full border border-cyan-400/35 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-700 dark:text-cyan-200">
-                  {product.category}
-                </span>
-                <h3 className="line-clamp-2 text-lg font-semibold text-slate-900 dark:text-white">
-                  {product.name}
-                </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-300">
-                  Rating {product.rating} • {product.reviewCount} reviews
-                </p>
-                <p className="text-2xl font-bold text-emerald-400">
-                  ${Number(product.price || 0).toFixed(2)}
-                </p>
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  EPC {Number(product.expectedRevenuePerClick || 0).toFixed(4)} • Score {Number(product.score || 0).toFixed(2)}
-                </p>
-                <a
-                  href={`${apiBaseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=US&placement=home_best_seller_buy&pageType=home`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-micro relative z-20 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-                >
-                  Buy on Amazon
-                </a>
-              </div>
+      {/* SEO Intent Links */}
+      {intents.length > 0 && (
+        <section className="mt-12">
+          <h2 className="text-xl font-bold text-slate-900">Shopping Guides</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Browse curated guides for specific buying needs.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {intents.map((intent) => (
               <Link
-                href={`/product/${encodeURIComponent(product.id)}`}
-                aria-label={`View details for ${product.name}`}
-                className="absolute inset-0 z-10 rounded-2xl"
-              />
-            </article>
-          ))}
-        </div>
+                key={intent.slug}
+                href={`/intent/${intent.slug}`}
+                className="group rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-violet-300 hover:shadow"
+              >
+                <h3 className="font-semibold text-slate-900 group-hover:text-violet-700">
+                  {intent.title}
+                </h3>
+                {intent.description && (
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-500">
+                    {intent.description}
+                  </p>
+                )}
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Engagement Panel */}
+      <section className="mt-12">
+        <HomeEngagementPanel />
       </section>
 
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Trending Shopping Guides</h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Intent-driven landing pages designed for organic traffic and high-conversion buyer journeys.
+      {/* CTA */}
+      <section className="mt-12 rounded-2xl bg-linear-to-r from-emerald-50 to-teal-50 px-6 py-10 text-center sm:px-12">
+        <h2 className="text-2xl font-bold text-slate-900">
+          Ready to find your next great product?
+        </h2>
+        <p className="mx-auto mt-2 max-w-lg text-sm text-slate-600">
+          Use our comparison tools and personalized recommendations to make
+          confident buying decisions.
         </p>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {intents.map((intent) => (
-            <Link
-              key={`intent-link-${intent.slug}`}
-              href={`/intent/${intent.slug}`}
-              className="btn-micro rounded-lg border border-violet-400/35 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-200"
-            >
-              {intent.title}
-            </Link>
-          ))}
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Link
+            href="/discover"
+            className="rounded-lg bg-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-emerald-600"
+          >
+            Start Browsing
+          </Link>
+          <Link
+            href="/compare"
+            className="rounded-lg border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            Compare Products
+          </Link>
+          <Link
+            href="/shortlist"
+            className="rounded-lg border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            Build a Shortlist
+          </Link>
         </div>
       </section>
-
-      <WeeklyPmCard />
-
-      <HomeEngagementPanel initialProducts={products} />
     </main>
   );
 }

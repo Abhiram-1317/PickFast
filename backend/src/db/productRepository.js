@@ -139,7 +139,7 @@ async function getDynamicPriceDropThresholds() {
     LEFT JOIN products p ON p.id = pcl.product_id
     WHERE pcl.old_price > 0
       AND pcl.new_price < pcl.old_price
-      AND datetime(pcl.changed_at) >= datetime('now', '-180 day')
+      AND pcl.changed_at >= NOW() - INTERVAL '180 days'
     GROUP BY COALESCE(p.category, 'general')
   `
   );
@@ -228,7 +228,7 @@ async function upsertProducts(products, source = "seed") {
         specs_json, use_cases_json, amazon_url, image, source, score, epc_score, expected_revenue_per_click,
         conversion_probability, modeled_commission_rate, estimated_commission_value,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
         slug = excluded.slug,
         name = excluded.name,
@@ -277,7 +277,7 @@ async function upsertProducts(products, source = "seed") {
         JSON.stringify(product.useCases || []),
         product.amazonUrl || null,
         product.image || null,
-        source,
+        product.source || source, // Prefer existing source if available (e.g. manual)
         product.score || 0,
         product.epcScore || 0,
         product.expectedRevenuePerClick || 0,
@@ -358,6 +358,7 @@ async function getRevenueModelSignals(lookbackDays = config.revenueModel.lookbac
 
   const productClicks = {};
   const categoryClicks = {};
+  const categoryConversions = {};
 
   const totalClicks = 0;
   const averageCategoryClicks = 0;

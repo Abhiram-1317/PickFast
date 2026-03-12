@@ -1,170 +1,146 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { fetchJson, fromSlug, getApiBaseUrl, toSlug } from "../../../lib/api";
+import Link from "next/link";
+import api, { fromSlug } from "../../../lib/api";
+import { trackBehaviorEvent, AnalyticsEvents } from "../../../lib/analytics";
+import ProductCard from "../../../components/ProductCard";
+import { CardSkeleton } from "../../../components/Skeletons";
+import { EmptyState, ErrorState } from "../../../components/StatusStates";
 
 export default function CategoryPage() {
-  const [categories, setCategories] = useState([]);
+  const { slug } = useParams();
+  return <CategoryInner key={slug} />;
+}
+
+function CategoryInner() {
+  const { slug } = useParams();
+  const categoryName = fromSlug(slug);
+
   const [products, setProducts] = useState([]);
-  const [region, setRegion] = useState("US");
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const params = useParams();
-
-  const baseUrl = getApiBaseUrl();
-  const selectedSlug = decodeURIComponent(params?.slug || "");
-
-  const selectedCategory = useMemo(() => {
-    if (!categories.length) {
-      return fromSlug(selectedSlug);
-    }
-
-    const match = categories.find((category) => toSlug(category) === selectedSlug);
-    return match || fromSlug(selectedSlug);
-  }, [categories, selectedSlug]);
+  const [sortBy, setSortBy] = useState("score");
 
   useEffect(() => {
-    let active = true;
-
-    fetchJson("/api/categories")
-      .then((payload) => {
-        if (active) {
-          setCategories(payload.categories || []);
-        }
-      })
-      .catch((requestError) => {
-        if (active) {
-          setError(requestError.message);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
+    api
+      .fetchCategories()
+      .then((d) => setCategories(d.categories || d || []))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (!selectedCategory) {
-      return;
-    }
-
+    if (!slug) return;
     let active = true;
 
-    const query = new URLSearchParams({
-      category: selectedCategory,
-      region,
-      sortBy: "score",
-      order: "desc",
-      limit: "24"
-    });
-
-    fetchJson(`/api/products?${query.toString()}`)
-      .then((payload) => {
+    api
+      .fetchProducts({ category: categoryName, limit: 50, sortBy, order: "desc" })
+      .then((data) => {
         if (active) {
-          setProducts(payload.products || []);
+          setProducts(data.products || []);
+          setError("");
+
+          trackBehaviorEvent({
+            eventType: AnalyticsEvents.pageView,
+            metadata: { page: "category", category: categoryName },
+          });
         }
       })
-      .catch((requestError) => {
-        if (active) {
-          setError(requestError.message);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
-      });
+      .catch((err) => { if (active) setError(err.message); })
+      .finally(() => { if (active) setLoading(false); });
 
-    return () => {
-      active = false;
-    };
-  }, [selectedCategory, region]);
+    return () => { active = false; };
+  }, [slug, categoryName, sortBy]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6">
-      <section className="glass rounded-2xl p-5 sm:p-6">
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">
-          Category: {selectedCategory || "Unknown"}
-        </h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Category navigation page for focused product exploration.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {categories.map((category) => (
-            <Link
-              key={`nav-${category}`}
-              href={`/category/${toSlug(category)}`}
-              className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                category === selectedCategory
-                  ? "bg-cyan-500 text-slate-950"
-                  : "border border-cyan-400/35 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200"
-              }`}
-            >
-              {category}
-            </Link>
-          ))}
-        </div>
-        <div className="mt-3">
-          <select
-            value={region}
-            onChange={(event) => {
-              setError("");
-              setLoading(true);
-              setRegion(event.target.value);
-            }}
-            className="rounded-xl border border-slate-300/80 bg-white/80 px-3 py-2 text-sm text-slate-900 dark:border-white/15 dark:bg-slate-900/70 dark:text-slate-100"
-          >
-            <option value="US">US</option>
-            <option value="UK">UK</option>
-            <option value="IN">IN</option>
-            <option value="CA">CA</option>
-          </select>
-        </div>
-      </section>
+    <main className="fade-in mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      {/* Breadcrumb */}
+      <nav className="mb-6 flex items-center gap-2 text-xs text-slate-400">
+        <Link href="/" className="hover:text-emerald-600">
+          Home
+        </Link>
+        <span>/</span>
+        <Link href="/discover" className="hover:text-emerald-600">
+          Discover
+        </Link>
+        <span>/</span>
+        <span className="font-medium text-slate-600">{categoryName}</span>
+      </nav>
 
-      {error ? (
-        <p className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-          {error}
-        </p>
-      ) : null}
-
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {loading ? (
-          <p className="sm:col-span-2 xl:col-span-3 text-sm text-slate-600 dark:text-slate-300">
-            Loading products...
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{categoryName}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            {loading
+              ? "Loading products..."
+              : `${products.length} product${products.length !== 1 ? "s" : ""} found`}
           </p>
-        ) : null}
-        {products.map((product) => (
-          <article key={product.id} className="glass relative rounded-2xl p-4">
-            <img
-              src={product.image || "/file.svg"}
-              alt={product.name}
-              className="h-40 w-full rounded-xl object-cover"
-            />
-            <h2 className="line-clamp-2 text-base font-semibold text-slate-900 dark:text-white">
-              {product.name}
-            </h2>
-            <p className="mt-1 text-sm font-bold text-emerald-400">
-              ${Number(product.price || 0).toFixed(2)}
-            </p>
-            <a
-              href={`${baseUrl}/api/buy/${toSlug(product.name)}?pid=${encodeURIComponent(product.id)}&region=${region}&placement=category_buy&pageType=category`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-micro relative z-20 mt-2 inline-flex rounded-lg bg-emerald-400 px-3 py-1.5 text-xs font-bold text-slate-950"
-            >
-              Buy
-            </a>
-            <Link
-              href={`/product/${encodeURIComponent(product.id)}`}
-              aria-label={`View details for ${product.name}`}
-              className="absolute inset-0 z-10 rounded-2xl"
-            />
-          </article>
-        ))}
-      </section>
+        </div>
+
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        >
+          <option value="score">Top Rated</option>
+          <option value="price">Price</option>
+          <option value="rating">Rating</option>
+          <option value="reviewCount">Most Reviewed</option>
+        </select>
+      </div>
+
+      {/* Category sibling chips */}
+      {categories.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {categories.map((cat) => {
+            const name = typeof cat === "string" ? cat : cat.name || cat.category;
+            const catSlug = name
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/(^-|-$)/g, "");
+            const isActive = catSlug === slug;
+            return (
+              <Link
+                key={name}
+                href={`/category/${catSlug}`}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  isActive
+                    ? "bg-emerald-500 text-white"
+                    : "border border-slate-200 bg-white text-slate-600 hover:border-emerald-300"
+                }`}
+              >
+                {name}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="mt-8">
+        {loading && <CardSkeleton count={6} />}
+
+        {error && <ErrorState message={error} onRetry={() => window.location.reload()} />}
+
+        {!loading && !error && products.length === 0 && (
+          <EmptyState
+            icon="📦"
+            title="No products found"
+            message={`We don\u2019t have any products in "${categoryName}" yet.`}
+            action={{ label: "Browse All", href: "/discover" }}
+          />
+        )}
+
+        {!loading && !error && products.length > 0 && (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {products.map((p) => (
+              <ProductCard key={p.id} product={p} pageType="category" />
+            ))}
+          </div>
+        )}
+      </div>
     </main>
   );
 }

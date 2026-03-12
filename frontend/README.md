@@ -1,33 +1,63 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PickFast Frontend
+
+Premium product discovery frontend built with **Next.js 16 (App Router)**, **React 19**, and **Tailwind CSS v4**.
+
+## Prerequisites
+
+- Node.js 18+
+- Backend running at `http://localhost:4000` (see `../backend/`)
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Routes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Route | Description |
+|---|---|
+| `/` | Home — hero, categories, spotlight, hot deals, top picks, shopping guides |
+| `/discover` | Product discovery with filters (category, budget, rating, sort, region) |
+| `/product/[id]` | Product detail with specs, use cases, similar products |
+| `/recommendations` | Personalized recommendations + hot deals |
+| `/compare` | Side-by-side product comparison with winner badges |
+| `/shortlist` | Save & share product shortlists |
+| `/category/[slug]` | Category-filtered product listing |
+| `/intent/[slug]` | SEO intent pages with curated product sets |
+| `/admin` | Admin dashboard — login, health, sync logs, price changes, clicks, experiments |
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/             # Next.js App Router pages
+├── components/      # Shared UI components
+│   ├── Navbar.js          # Sticky header with nav links
+│   ├── ProductCard.js     # Product card with affiliate links
+│   ├── FilterBar.js       # Configurable filter dropdowns
+│   ├── Skeletons.js       # Loading placeholders
+│   ├── StatusStates.js    # Empty & error states
+│   ├── HomeEngagementPanel.js  # Quick compare, recommendations, newsletter
+│   └── WeeklyPmCard.js    # Weekly PM report widget
+└── lib/
+    ├── api.js       # API client (all backend endpoints)
+    └── analytics.js # Client-side event tracking
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Backend API
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+All API calls go to `http://localhost:4000/api`. The API client is in `src/lib/api.js` with timeout handling and safe fetching for server components.
+
+## Build
+
+```bash
+npm run build   # Production build
+npm run lint    # Lint check
+```
 
 ## Deploy on Vercel
 

@@ -1,15 +1,14 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactCompiler: true,
-  turbopack: {
-    root: __dirname
-  }
+  reactStrictMode: true,
+  output: "standalone",
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "m.media-amazon.com" },
+      { protocol: "https", hostname: "images-na.ssl-images-amazon.com" },
+      { protocol: "https", hostname: "images-eu.ssl-images-amazon.com" },
+    ],
+  },
 };
 
 export default nextConfig;
