@@ -41,6 +41,58 @@ a {
 	backdrop-filter: blur(12px);
 }
 
+.glass-card {
+	background: rgba(255, 255, 255, 0.7);
+	border: 1px solid rgba(255, 255, 255, 0.5);
+	box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+	backdrop-filter: blur(16px);
+}
+
+.glass-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.375rem;
+	border-radius: 0.75rem;
+	border: 1px solid rgba(226, 232, 240, 0.6);
+	background: rgba(255, 255, 255, 0.7);
+	backdrop-filter: blur(8px);
+	padding: 0.5rem 1rem;
+	font-size: 0.875rem;
+	font-weight: 600;
+	color: var(--pf-text);
+	transition: all 0.2s;
+}
+.glass-btn:hover {
+	background: rgba(255, 255, 255, 0.9);
+	box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.admin-label {
+	display: block;
+	margin-bottom: 0.25rem;
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: #64748b;
+}
+
+.admin-input {
+	display: block;
+	border-radius: 0.75rem;
+	border: 1px solid #e2e8f0;
+	background: rgba(255, 255, 255, 0.6);
+	padding: 0.625rem 0.875rem;
+	font-size: 0.875rem;
+	color: var(--pf-text);
+	transition: border-color 0.2s, box-shadow 0.2s;
+}
+.admin-input:focus {
+	outline: none;
+	border-color: #34d399;
+	box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
+}
+
 .fade-in {
 	animation: fadeIn 300ms ease;
 }

@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
@@ -71,7 +72,7 @@ const app = express();
 const port = config.port;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
 
 const adminSessions = new Map();
 
@@ -851,6 +852,70 @@ app.get("/api/admin/reminders/notifications", ensureAdmin, async (req, res) => {
   const notifications = await getShortlistReminderNotifications(req.query.limit || 100);
   res.json({ notifications });
 });
+
+// ── Admin Product CRUD ─────────────────────────────
+const {
+  listAdminProducts,
+  createAdminProduct,
+  updateAdminProduct,
+  deleteAdminProduct
+} = require("./db/adminProducts");
+
+const UPLOAD_DIR = path.join(__dirname, "../public/uploads");
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+app.get("/api/admin/products", ensureAdmin, async (req, res) => {
+  const products = await listAdminProducts();
+  res.json({ products });
+});
+
+app.post("/api/admin/products", ensureAdmin, async (req, res) => {
+  const result = await createAdminProduct(req.body);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.status(201).json(result);
+});
+
+app.put("/api/admin/products/:id", ensureAdmin, async (req, res) => {
+  const result = await updateAdminProduct(req.params.id, req.body);
+  if (result.notFound) return res.status(404).json({ error: "Product not found" });
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json(result);
+});
+
+app.delete("/api/admin/products/:id", ensureAdmin, async (req, res) => {
+  const result = await deleteAdminProduct(req.params.id);
+  if (!result.deleted) return res.status(404).json({ error: "Product not found" });
+  res.json({ ok: true });
+});
+
+// Image upload — accepts base64 JSON body { filename, data }
+app.post("/api/admin/upload", ensureAdmin, (req, res) => {
+  const { filename, data } = req.body;
+  if (!filename || !data) {
+    return res.status(400).json({ error: "filename and data (base64) are required" });
+  }
+
+  const ext = path.extname(filename).toLowerCase();
+  const allowed = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".mp4", ".webm"];
+  if (!allowed.includes(ext)) {
+    return res.status(400).json({ error: `File type ${ext} not allowed` });
+  }
+
+  const safeName = `${crypto.randomBytes(8).toString("hex")}${ext}`;
+  const buffer = Buffer.from(data, "base64");
+
+  if (buffer.length > 10 * 1024 * 1024) {
+    return res.status(400).json({ error: "File too large (max 10MB)" });
+  }
+
+  fs.writeFileSync(path.join(UPLOAD_DIR, safeName), buffer);
+  const url = `/uploads/${safeName}`;
+  res.json({ url, filename: safeName });
+});
+
+app.use("/uploads", express.static(UPLOAD_DIR));
 
 app.use(express.static(path.join(__dirname, "../public")));
 

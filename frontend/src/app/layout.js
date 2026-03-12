@@ -8,6 +8,11 @@ export const metadata = {
   title: "PickFast | Smart Product Discovery",
   description:
     "Find, compare, and buy the best products with data-driven recommendations powered by PickFast.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({ children }) {
