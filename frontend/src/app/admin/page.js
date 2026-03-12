@@ -12,8 +12,7 @@ function getToken() {
 }
 
 function apiBase() {
-  if (typeof window !== "undefined")
-    return `${window.location.protocol}//${window.location.hostname}:4000`;
+  if (typeof window !== "undefined") return "";
   return "http://localhost:4000";
 }
 
@@ -37,13 +36,13 @@ function StatCard({ label, value, sub, icon }) {
     <div className="glass-card rounded-2xl p-5 text-center">
       {icon && <div className="mx-auto mb-2 text-2xl">{icon}</div>}
       <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
-      <p className="mt-1 text-2xl font-extrabold text-slate-900">{value ?? "â€”"}</p>
+      <p className="mt-1 text-2xl font-extrabold text-slate-900">{value ?? "\u2014"}</p>
       {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
     </div>
   );
 }
 
-/* â”€â”€ Image / Video Upload Widget â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Image / Video Upload Widget */
 function MediaUploader({ value, onChange, token }) {
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -68,9 +67,8 @@ function MediaUploader({ value, onChange, token }) {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Upload failed");
-      const fullUrl = `${apiBase()}${json.url}`;
-      setPreview(fullUrl);
-      onChange(fullUrl);
+      setPreview(json.url);
+      onChange(json.url);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -92,7 +90,7 @@ function MediaUploader({ value, onChange, token }) {
           )
         ) : (
           <div className="text-center">
-            <div className="text-3xl text-slate-300 group-hover:text-emerald-400 transition">ðŸ“¸</div>
+            <div className="text-3xl text-slate-300 group-hover:text-emerald-400 transition">{"\uD83D\uDCF8"}</div>
             <p className="mt-1 text-xs text-slate-400">Click to upload image or video</p>
           </div>
         )}
@@ -109,7 +107,7 @@ function MediaUploader({ value, onChange, token }) {
   );
 }
 
-/* â”€â”€ Product Form Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Product Form Modal */
 function ProductFormModal({ product, onSave, onCancel, token }) {
   const isEdit = Boolean(product?.id);
   const [form, setForm] = useState({
@@ -166,7 +164,7 @@ function ProductFormModal({ product, onSave, onCancel, token }) {
             <textarea value={form.description} onChange={(e) => set("description", e.target.value)} rows={3} className="admin-input w-full resize-none" placeholder="Product description..." />
           </div>
           <div>
-            <label className="admin-label">Price (â‚¹) *</label>
+            <label className="admin-label">{`Price (\u20B9) *`}</label>
             <input type="number" step="0.01" min="0" value={form.price} onChange={(e) => set("price", e.target.value)} required className="admin-input w-full" />
           </div>
           <div>
@@ -198,7 +196,7 @@ function ProductFormModal({ product, onSave, onCancel, token }) {
   );
 }
 
-/* â”€â”€ Main Admin Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Main Admin Page */
 export default function AdminPage() {
   const [token, setToken] = useState(null);
   const [loginError, setLoginError] = useState("");
@@ -293,7 +291,9 @@ export default function AdminPage() {
       <main className="fade-in flex min-h-[60vh] items-center justify-center px-4">
         <form onSubmit={handleLogin} className="glass-card w-full max-w-sm rounded-2xl p-8 space-y-5">
           <div className="text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 text-2xl shadow-lg shadow-emerald-500/30">ðŸ”</div>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 text-2xl shadow-lg shadow-emerald-500/30">
+              <svg className="h-7 w-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+            </div>
             <h1 className="mt-4 text-xl font-bold text-slate-900">Admin Login</h1>
             <p className="mt-1 text-sm text-slate-500">Sign in to the PickFast dashboard</p>
           </div>
@@ -315,13 +315,13 @@ export default function AdminPage() {
   }
 
   const tabs = [
-    { key: "products", label: "ðŸ“¦ Products" },
-    { key: "overview", label: "ðŸ“Š Overview" },
-    { key: "sync", label: "ðŸ”„ Sync" },
-    { key: "prices", label: "ðŸ’° Prices" },
-    { key: "clicks", label: "ðŸ–±ï¸ Clicks" },
-    { key: "experiments", label: "ðŸ§ª Experiments" },
-    { key: "weekly", label: "ðŸ“… Weekly" },
+    { key: "products", label: "Products", icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" },
+    { key: "overview", label: "Overview", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
+    { key: "sync", label: "Sync", icon: "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" },
+    { key: "prices", label: "Prices", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+    { key: "clicks", label: "Clicks", icon: "M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" },
+    { key: "experiments", label: "Experiments", icon: "M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" },
+    { key: "weekly", label: "Weekly", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
   ];
 
   return (
@@ -337,7 +337,7 @@ export default function AdminPage() {
           <p className="mt-1 text-sm text-slate-500">Manage products, monitor performance, and optimize your catalog.</p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => { loadDashboard(); loadProducts(); }} disabled={dashLoading} className="glass-btn">{dashLoading ? "Refreshing..." : "â†» Refresh"}</button>
+          <button type="button" onClick={() => { loadDashboard(); loadProducts(); }} disabled={dashLoading} className="glass-btn">{dashLoading ? "Refreshing..." : "Refresh"}</button>
           <button type="button" onClick={handleLogout} className="glass-btn text-red-600 hover:bg-red-50">Logout</button>
         </div>
       </div>
@@ -345,7 +345,8 @@ export default function AdminPage() {
       <div className="mt-6 flex gap-1 overflow-x-auto rounded-2xl border border-white/40 bg-white/50 p-1.5 backdrop-blur-lg shadow-sm">
         {tabs.map((t) => (
           <button key={t.key} type="button" onClick={() => setActiveTab(t.key)}
-            className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-all ${activeTab === t.key ? "bg-white text-emerald-700 shadow-md" : "text-slate-500 hover:text-slate-700 hover:bg-white/60"}`}>
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-all ${activeTab === t.key ? "bg-white text-emerald-700 shadow-md" : "text-slate-500 hover:text-slate-700 hover:bg-white/60"}`}>
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={t.icon} /></svg>
             {t.label}
           </button>
         ))}
@@ -362,7 +363,7 @@ export default function AdminPage() {
             </div>
             {productsLoading ? <TableSkeleton rows={3} cols={5} /> : products.length === 0 ? (
               <div className="glass-card rounded-2xl p-12 text-center">
-                <div className="text-5xl">ðŸ“¦</div>
+                <svg className="mx-auto h-12 w-12 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
                 <h3 className="mt-4 text-lg font-bold text-slate-900">No products yet</h3>
                 <p className="mt-2 text-sm text-slate-500">Click &quot;Add Product&quot; to create your first product.</p>
               </div>
@@ -376,7 +377,9 @@ export default function AdminPage() {
                       ) : (
                         <img src={p.imageUrl} alt={p.title} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
                       )) : (
-                        <div className="flex h-full items-center justify-center text-4xl text-slate-300">ðŸ“·</div>
+                        <div className="flex h-full items-center justify-center">
+                          <svg className="h-10 w-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        </div>
                       )}
                     </div>
                     <div className="p-4 space-y-2">
@@ -384,13 +387,13 @@ export default function AdminPage() {
                         <h3 className="text-sm font-bold text-slate-900 line-clamp-2">{p.title}</h3>
                         <Badge color="blue">{p.category || "General"}</Badge>
                       </div>
-                      <p className="text-lg font-extrabold text-emerald-600">â‚¹{Number(p.price || 0).toLocaleString("en-IN")}</p>
-                      {p.rating != null && <div className="flex items-center gap-1 text-xs text-amber-500">â­ {Number(p.rating).toFixed(1)}</div>}
+                      <p className="text-lg font-extrabold text-emerald-600">{`\u20B9${Number(p.price || 0).toLocaleString("en-IN")}`}</p>
+                      {p.rating != null && <div className="flex items-center gap-1 text-xs text-amber-500">{`\u2B50 ${Number(p.rating).toFixed(1)}`}</div>}
                       <div className="flex gap-2 pt-2">
                         <button type="button" onClick={() => { setEditProduct(p); setShowForm(true); }}
-                          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-600">âœï¸ Edit</button>
+                          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-emerald-300 hover:text-emerald-600">Edit</button>
                         <button type="button" onClick={() => handleDeleteProduct(p.id)}
-                          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-500 transition hover:border-red-300 hover:bg-red-50">ðŸ—‘ï¸ Delete</button>
+                          className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-500 transition hover:border-red-300 hover:bg-red-50">Delete</button>
                       </div>
                     </div>
                   </div>
@@ -403,10 +406,10 @@ export default function AdminPage() {
         {!dashLoading && activeTab === "overview" && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <StatCard icon="ðŸ’š" label="Status" value={health?.status === "ok" ? <Badge color="green">Healthy</Badge> : <Badge color="red">Down</Badge>} />
-              <StatCard icon="ðŸ“¦" label="Products" value={health?.totalProducts ?? "â€”"} />
-              <StatCard icon="ðŸ”„" label="Sync Logs" value={Array.isArray(syncLogs) ? syncLogs.length : 0} />
-              <StatCard icon="ðŸ’°" label="Price Changes" value={Array.isArray(priceChanges) ? priceChanges.length : 0} />
+              <StatCard label="Status" value={health?.status === "ok" ? <Badge color="green">Healthy</Badge> : <Badge color="red">Down</Badge>} />
+              <StatCard label="Products" value={health?.totalProducts ?? "\u2014"} />
+              <StatCard label="Sync Logs" value={Array.isArray(syncLogs) ? syncLogs.length : 0} />
+              <StatCard label="Price Changes" value={Array.isArray(priceChanges) ? priceChanges.length : 0} />
             </div>
             {weeklyReport && (
               <div className="glass-card rounded-2xl p-5">
@@ -428,11 +431,11 @@ export default function AdminPage() {
                 </tr></thead>
                 <tbody>{(Array.isArray(syncLogs) ? syncLogs : []).map((log, i) => (
                   <tr key={log.id || i} className="border-b border-slate-50/50 transition hover:bg-white/60">
-                    <td className="px-4 py-2 font-medium text-slate-800">{log.syncType || log.type || "â€”"}</td>
+                    <td className="px-4 py-2 font-medium text-slate-800">{log.syncType || log.type || "\u2014"}</td>
                     <td className="px-4 py-2"><Badge color={log.status === "success" ? "green" : "red"}>{log.status}</Badge></td>
-                    <td className="px-4 py-2">{log.itemsProcessed ?? "â€”"}</td>
-                    <td className="px-4 py-2 text-slate-500">{log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "â€”"}</td>
-                    <td className="max-w-50 truncate px-4 py-2 text-slate-500">{log.message || "â€”"}</td>
+                    <td className="px-4 py-2">{log.itemsProcessed ?? "\u2014"}</td>
+                    <td className="px-4 py-2 text-slate-500">{log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "\u2014"}</td>
+                    <td className="max-w-50 truncate px-4 py-2 text-slate-500">{log.message || "\u2014"}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -454,11 +457,11 @@ export default function AdminPage() {
                   const diff = (Number(pc.newPrice) - Number(pc.oldPrice)).toFixed(2);
                   return (
                     <tr key={pc.id || i} className="border-b border-slate-50/50 transition hover:bg-white/60">
-                      <td className="px-4 py-2 font-medium text-slate-800">{pc.productId || pc.name || "â€”"}</td>
-                      <td className="px-4 py-2">â‚¹{Number(pc.oldPrice || 0).toFixed(2)}</td>
-                      <td className="px-4 py-2 font-semibold">â‚¹{Number(pc.newPrice || 0).toFixed(2)}</td>
+                      <td className="px-4 py-2 font-medium text-slate-800">{pc.productId || pc.name || "\u2014"}</td>
+                      <td className="px-4 py-2">{`\u20B9${Number(pc.oldPrice || 0).toFixed(2)}`}</td>
+                      <td className="px-4 py-2 font-semibold">{`\u20B9${Number(pc.newPrice || 0).toFixed(2)}`}</td>
                       <td className={`px-4 py-2 font-semibold ${diff > 0 ? "text-red-600" : "text-emerald-600"}`}>{diff > 0 ? "+" : ""}{diff}</td>
-                      <td className="px-4 py-2 text-slate-500">{pc.createdAt ? new Date(pc.createdAt).toLocaleDateString() : "â€”"}</td>
+                      <td className="px-4 py-2 text-slate-500">{pc.createdAt ? new Date(pc.createdAt).toLocaleDateString() : "\u2014"}</td>
                     </tr>
                   );
                 })}</tbody>
